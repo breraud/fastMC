@@ -1,12 +1,16 @@
 use iced::widget::{button, container, row, text};
 use iced::{Alignment, Border, Color, Element, Length};
 
-const BTN_SIDEBAR_BG: Color = Color::from_rgb(0.13, 0.77, 0.36);
-const BTN_SIDEBAR_HOVER: Color = Color::from_rgb(0.11, 0.65, 0.31);
+const BTN_SIDEBAR_ACTIVE: Color = Color::from_rgb(0.13, 0.77, 0.36);
+const BTN_SIDEBAR_HOVER: Color = Color::from_rgb(0.13, 0.14, 0.16);
+const BTN_SIDEBAR_BASE: Color = Color::from_rgb(0.10, 0.10, 0.12);
+const BTN_TEXT_ACTIVE: Color = Color::WHITE;
+const BTN_TEXT_INACTIVE: Color = Color::from_rgb(0.74, 0.76, 0.79);
 
 pub fn menu_button<'a, Message>(
     icon: Option<Element<'a, Message>>,
     label: &'a str,
+    is_active: bool,
 ) -> iced::widget::Button<'a, Message>
 where
     Message: 'a,
@@ -24,10 +28,14 @@ where
 
     iced::widget::button(content)
         .padding([10, 20])
-        .style(|_theme, status| {
-            let bg = match status {
-                button::Status::Hovered | button::Status::Pressed => BTN_SIDEBAR_HOVER,
-                _ => BTN_SIDEBAR_BG,
+        .style(move |_theme, status| {
+            let bg = if is_active {
+                BTN_SIDEBAR_ACTIVE
+            } else {
+                match status {
+                    button::Status::Hovered | button::Status::Pressed => BTN_SIDEBAR_HOVER,
+                    _ => BTN_SIDEBAR_BASE,
+                }
             };
 
             button::Style {

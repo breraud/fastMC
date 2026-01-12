@@ -1,5 +1,8 @@
 mod screens;
-use screens::{PlayMessage, PlayScreen};
+use screens::{
+    JavaManagerMessage, JavaManagerScreen, ModpacksMessage, ModpacksScreen, PlayMessage,
+    PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
+};
 
 mod theme;
 use theme::{icon_from_path, menu_button};
@@ -7,39 +10,77 @@ use theme::{icon_from_path, menu_button};
 #[derive(Clone)]
 pub enum Message {
     PlayScreen(PlayMessage),
-    MenuButtonPressed,
+    ServerScreen(ServerMessage),
+    ModpacksScreen(ModpacksMessage),
+    JavaManagerScreen(JavaManagerMessage),
+    SettingsScreen(SettingsMessage),
+    MenuItemSelected(MenuItem),
 }
 
-enum Screen {
-    PlayScreen(PlayScreen),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItem {
+    Play,
+    Server,
+    Modpacks,
+    JavaManager,
+    Settings,
 }
 
-impl Default for Screen {
-    fn default() -> Self {
-        Screen::PlayScreen(PlayScreen::default())
-    }
-}
-
-#[derive(Default)]
 struct App {
-    screen: Screen,
+    selected_menu: MenuItem,
+    play: PlayScreen,
+    server: ServerScreen,
+    modpacks: ModpacksScreen,
+    java_manager: JavaManagerScreen,
+    settings: SettingsScreen,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            selected_menu: MenuItem::Play,
+            play: PlayScreen::default(),
+            server: ServerScreen,
+            modpacks: ModpacksScreen,
+            java_manager: JavaManagerScreen,
+            settings: SettingsScreen,
+        }
+    }
 }
 
 impl App {
     fn update(&mut self, message: Message) -> iced::Task<Message> {
-        match (&mut self.screen, message) {
-            (Screen::PlayScreen(screen), Message::PlayScreen(play_message)) => {
-                screen.update(play_message);
+        match message {
+            Message::PlayScreen(play_message) => {
+                self.play.update(play_message);
             }
-            (Screen::PlayScreen(_), Message::MenuButtonPressed) => {}
+            Message::ServerScreen(server_message) => {
+                self.server.update(server_message);
+            }
+            Message::ModpacksScreen(modpacks_message) => {
+                self.modpacks.update(modpacks_message);
+            }
+            Message::JavaManagerScreen(java_manager_message) => {
+                self.java_manager.update(java_manager_message);
+            }
+            Message::SettingsScreen(settings_message) => {
+                self.settings.update(settings_message);
+            }
+            Message::MenuItemSelected(item) => {
+                self.selected_menu = item;
+            }
         }
 
         iced::Task::none()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
-        let content = match &self.screen {
-            Screen::PlayScreen(screen) => screen.view().map(Message::PlayScreen),
+        let content = match self.selected_menu {
+            MenuItem::Play => self.play.view().map(Message::PlayScreen),
+            MenuItem::Server => self.server.view().map(Message::ServerScreen),
+            MenuItem::Modpacks => self.modpacks.view().map(Message::ModpacksScreen),
+            MenuItem::JavaManager => self.java_manager.view().map(Message::JavaManagerScreen),
+            MenuItem::Settings => self.settings.view().map(Message::SettingsScreen),
         };
         let content_area = iced::widget::container(content)
             .width(iced::Length::Fill)
@@ -55,11 +96,15 @@ impl App {
             });
 
         let menu_items = [
-            ("Play", "assets/svg/play.svg"),
-            ("Server", "assets/svg/server.svg"),
-            ("Package", "assets/svg/package.svg"),
-            ("Java Manager", "assets/svg/coffee.svg"),
-            ("Settings", "assets/svg/settings.svg"),
+            (MenuItem::Play, "Play", "assets/svg/play.svg"),
+            (MenuItem::Server, "Server", "assets/svg/server.svg"),
+            (MenuItem::Modpacks, "Modpacks", "assets/svg/package.svg"),
+            (
+                MenuItem::JavaManager,
+                "Java Manager",
+                "assets/svg/coffee.svg",
+            ),
+            (MenuItem::Settings, "Settings", "assets/svg/settings.svg"),
         ];
 
         let left_stack = menu_items.into_iter().fold(
@@ -67,11 +112,15 @@ impl App {
                 .spacing(8)
                 .width(iced::Length::Fill)
                 .align_x(iced::Alignment::Center),
-            |col, (label, path)| {
+            |col, (item, label, path)| {
                 let icon = icon_from_path::<Message>(path);
-                let button = menu_button(Some(icon), label)
-                    .width(iced::Length::FillPortion(12))
-                    .on_press(Message::MenuButtonPressed);
+                let is_active = self.selected_menu == item;
+                let mut button =
+                    menu_button(Some(icon), label, is_active).width(iced::Length::FillPortion(12));
+
+                if !is_active {
+                    button = button.on_press(Message::MenuItemSelected(item));
+                }
 
                 let padded = iced::widget::row![
                     iced::widget::Space::new().width(iced::Length::FillPortion(1)),
@@ -108,7 +157,7 @@ impl App {
 
 pub fn main() -> iced::Result {
     iced::application(App::default, App::update, App::view)
-        .title("Test rust")
+        .title("FastMC Launcher")
         .theme(iced::Theme::Dracula)
         .run()
 }
