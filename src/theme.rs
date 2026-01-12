@@ -17,7 +17,7 @@ where
 {
     let content_row = match icon {
         Some(icon) => row![icon, text(label).size(16)]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center),
         None => row![text(label).size(16)].align_y(Alignment::Center),
     };
@@ -27,7 +27,7 @@ where
         .align_x(Alignment::Start);
 
     iced::widget::button(content)
-        .padding([10, 20])
+        .padding([14, 18])
         .style(move |_theme, status| {
             let bg = if is_active {
                 BTN_SIDEBAR_ACTIVE
@@ -40,9 +40,13 @@ where
 
             button::Style {
                 background: Some(bg.into()),
-                text_color: Color::WHITE,
+                text_color: if is_active {
+                    BTN_TEXT_ACTIVE
+                } else {
+                    BTN_TEXT_INACTIVE
+                },
                 border: Border {
-                    radius: 8.0.into(),
+                    radius: 12.0.into(),
                     ..Border::default()
                 },
                 ..button::Style::default()
