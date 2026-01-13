@@ -1,6 +1,8 @@
-//TODO: Implement the library
-// Example implementation:
-pub fn authenticate(_username: &str, _password: &str) -> Result<(), String> {
-    // Implementation details here
-    Ok(())
-}
+mod authenticator;
+mod errors;
+mod models;
+mod responses;
+
+pub use authenticator::MicrosoftAuthenticator;
+pub use errors::AuthError;
+pub use models::{DeviceCodeInfo, MicrosoftTokens, MinecraftProfile, MinecraftSession};

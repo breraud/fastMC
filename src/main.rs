@@ -4,6 +4,7 @@ use screens::{
     PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
 };
 
+mod account;
 mod theme;
 use theme::{icon_from_path, menu_button};
 
@@ -118,7 +119,6 @@ impl App {
         let badge = iced::widget::container(iced::widget::text("MC").size(18).style(move |_| {
             iced::widget::text::Style {
                 color: Some(iced::Color::WHITE),
-                ..iced::widget::text::Style::default()
             }
         }))
         .padding([10, 14])
@@ -141,14 +141,12 @@ impl App {
                 iced::widget::text("Minecraft").size(20).style(move |_| {
                     iced::widget::text::Style {
                         color: Some(text_primary),
-                        ..iced::widget::text::Style::default()
                     }
                 }),
                 iced::widget::text("Launcher")
                     .size(14)
                     .style(move |_| iced::widget::text::Style {
                         color: Some(text_muted),
-                        ..iced::widget::text::Style::default()
                     }),
             ]
             .spacing(2)
@@ -192,7 +190,6 @@ impl App {
             iced::widget::container(iced::widget::text("P").size(16).style(move |_| {
                 iced::widget::text::Style {
                     color: Some(text_primary),
-                    ..iced::widget::text::Style::default()
                 }
             }))
             .width(iced::Length::Fixed(44.0))
@@ -213,13 +210,11 @@ impl App {
                 .size(16)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_primary),
-                    ..iced::widget::text::Style::default()
                 }),
             iced::widget::text("Premium Account")
                 .size(13)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_muted),
-                    ..iced::widget::text::Style::default()
                 }),
         ]
         .spacing(2);
