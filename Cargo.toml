@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["config","microsoft_auth"]
+members = ["account_manager","config", "launcher","microsoft_auth"]
 
 [package]
 name = "fastmc"

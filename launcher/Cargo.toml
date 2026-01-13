@@ -1,0 +1,8 @@
+[package]
+name = "launcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+microsoft_auth = { path = "../microsoft_auth" }
+account_manager = { path = "../account_manager" }

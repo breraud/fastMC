@@ -20,18 +20,3 @@ pub struct MicrosoftTokens {
     pub refresh_token: String,
     pub expires_at: u64,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MinecraftProfile {
-    pub id: String,
-    pub name: String,
-    pub skin_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MinecraftSession {
-    pub access_token: String,
-    pub expires_at: u64,
-    pub refresh_token: String,
-    pub profile: MinecraftProfile,
-}

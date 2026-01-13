@@ -4,7 +4,6 @@ use screens::{
     PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
 };
 
-mod account;
 mod theme;
 use theme::{icon_from_path, menu_button};
 

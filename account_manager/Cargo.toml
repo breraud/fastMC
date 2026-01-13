@@ -1,0 +1,15 @@
+[package]
+name = "account_manager"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+directories = "5.0"
+reqwest = { version = "0.11.24", features = ["json", "blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.10", features = ["v3", "v4", "v5", "serde"] }
+md-5 = "0.10"
+microsoft_auth = { path = "../microsoft_auth" }
+keyring = "2.3"
+thiserror = "1.0"
