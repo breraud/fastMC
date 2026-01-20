@@ -1,14 +1,19 @@
 mod screens;
 use screens::{
-    JavaManagerMessage, JavaManagerScreen, ModpacksMessage, ModpacksScreen, PlayMessage,
-    PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
+    AccountMessage, AccountScreen, AccountUpdate, JavaManagerMessage, JavaManagerScreen,
+    ModpacksMessage, ModpacksScreen, PlayMessage, PlayScreen, ServerMessage, ServerScreen,
+    SettingsMessage, SettingsScreen,
 };
 
 mod theme;
 use theme::{icon_from_path, menu_button};
 
+use account_manager::AccountKind;
+use fastmc_config::FastmcConfig;
+
 #[derive(Clone)]
 pub enum Message {
+    AccountScreen(Box<AccountMessage>),
     PlayScreen(PlayMessage),
     ServerScreen(ServerMessage),
     ModpacksScreen(ModpacksMessage),
@@ -16,6 +21,12 @@ pub enum Message {
     SettingsScreen(SettingsMessage),
     MenuItemSelected(MenuItem),
     AccountPressed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    AccountSetup,
+    Main,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +39,9 @@ pub enum MenuItem {
 }
 
 struct App {
+    stage: Stage,
     selected_menu: MenuItem,
+    account: AccountScreen,
     play: PlayScreen,
     server: ServerScreen,
     modpacks: ModpacksScreen,
@@ -38,8 +51,18 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
+        let config = FastmcConfig::load().unwrap_or_default();
+        let account = AccountScreen::new(config.accounts.microsoft_client_id.clone());
+        let stage = if account.has_accounts() {
+            Stage::Main
+        } else {
+            Stage::AccountSetup
+        };
+
         Self {
+            stage,
             selected_menu: MenuItem::Play,
+            account,
             play: PlayScreen::default(),
             server: ServerScreen,
             modpacks: ModpacksScreen,
@@ -52,31 +75,57 @@ impl Default for App {
 impl App {
     fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
+            Message::AccountScreen(account_message) => {
+                let (action, task) = self.account.update(*account_message);
+                if matches!(action, AccountUpdate::EnterLauncher) && self.account.has_accounts() {
+                    self.stage = Stage::Main;
+                }
+
+                task.map(|msg| Message::AccountScreen(Box::new(msg)))
+            }
             Message::PlayScreen(play_message) => {
                 self.play.update(play_message);
+                iced::Task::none()
             }
             Message::ServerScreen(server_message) => {
                 self.server.update(server_message);
+                iced::Task::none()
             }
             Message::ModpacksScreen(modpacks_message) => {
                 self.modpacks.update(modpacks_message);
+                iced::Task::none()
             }
             Message::JavaManagerScreen(java_manager_message) => {
                 self.java_manager.update(java_manager_message);
+                iced::Task::none()
             }
             Message::SettingsScreen(settings_message) => {
                 self.settings.update(settings_message);
+                iced::Task::none()
             }
             Message::MenuItemSelected(item) => {
+                self.stage = Stage::Main;
                 self.selected_menu = item;
+                iced::Task::none()
             }
-            Message::AccountPressed => {}
+            Message::AccountPressed => {
+                self.stage = Stage::AccountSetup;
+                iced::Task::none()
+            }
         }
-
-        iced::Task::none()
     }
 
     fn view(&self) -> iced::Element<'_, Message> {
+        match self.stage {
+            Stage::AccountSetup => self
+                .account
+                .view()
+                .map(|msg| Message::AccountScreen(Box::new(msg))),
+            Stage::Main => self.main_view(),
+        }
+    }
+
+    fn main_view(&self) -> iced::Element<'_, Message> {
         let sidebar_background = iced::Color::from_rgb(0.10, 0.10, 0.12);
         let text_primary = iced::Color::from_rgb(0.88, 0.89, 0.91);
         let text_muted = iced::Color::from_rgb(0.63, 0.64, 0.67);
@@ -185,12 +234,36 @@ impl App {
             .padding([8, 4])
             .width(iced::Length::Fill);
 
+        let (account_title, account_subtitle, account_badge_text) =
+            if let Some(account) = self.account.active_account() {
+                let badge = account
+                    .display_name
+                    .chars()
+                    .next()
+                    .unwrap_or('A')
+                    .to_string();
+                let subtitle = match &account.kind {
+                    AccountKind::Microsoft { username, .. } => {
+                        format!("Microsoft • {username}")
+                    }
+                    AccountKind::Offline { username, .. } => format!("Offline • {username}"),
+                };
+
+                (account.display_name.clone(), subtitle, badge)
+            } else {
+                (
+                    "Add account".to_string(),
+                    "Connect your Microsoft profile".to_string(),
+                    "+".to_string(),
+                )
+            };
+
         let account_avatar =
-            iced::widget::container(iced::widget::text("P").size(16).style(move |_| {
-                iced::widget::text::Style {
+            iced::widget::container(iced::widget::text(account_badge_text).size(16).style(
+                move |_| iced::widget::text::Style {
                     color: Some(text_primary),
-                }
-            }))
+                },
+            ))
             .width(iced::Length::Fixed(44.0))
             .height(iced::Length::Fixed(44.0))
             .align_x(iced::Alignment::Center)
@@ -205,12 +278,12 @@ impl App {
             });
 
         let account_info = iced::widget::column![
-            iced::widget::text("Steve_Miner")
+            iced::widget::text(account_title)
                 .size(16)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_primary),
                 }),
-            iced::widget::text("Premium Account")
+            iced::widget::text(account_subtitle)
                 .size(13)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_muted),

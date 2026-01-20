@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-const CONFIG_VERSION: u32 = 1;
+const CONFIG_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -38,6 +38,15 @@ pub struct JavaConfig {
     /// Whether to auto-discover Java installations.
     #[serde(default = "default_true")]
     pub auto_discover: bool,
+    /// Requested minimum RAM (in megabytes) for the JVM.
+    #[serde(default = "default_min_memory_mb")]
+    pub min_memory_mb: u32,
+    /// Requested maximum RAM (in megabytes) for the JVM.
+    #[serde(default = "default_max_memory_mb")]
+    pub max_memory_mb: u32,
+    /// Extra JVM arguments to append during launch.
+    #[serde(default)]
+    pub extra_jvm_args: Vec<String>,
 }
 
 impl Default for JavaConfig {
@@ -45,6 +54,9 @@ impl Default for JavaConfig {
         Self {
             java_path: None,
             auto_discover: true,
+            min_memory_mb: default_min_memory_mb(),
+            max_memory_mb: default_max_memory_mb(),
+            extra_jvm_args: Vec::new(),
         }
     }
 }
@@ -136,6 +148,14 @@ fn migrate(config: &mut FastmcConfig) {
 
 fn default_version() -> u32 {
     CONFIG_VERSION
+}
+
+fn default_min_memory_mb() -> u32 {
+    1024
+}
+
+fn default_max_memory_mb() -> u32 {
+    4096
 }
 
 fn default_true() -> bool {

@@ -1,6 +1,6 @@
 use directories::ProjectDirs;
 use keyring::{Entry, Error as KeyringError};
-use microsoft_auth::MicrosoftTokens;
+use microsoft_auth::{DeviceCodeInfo, MicrosoftAuthenticator, MicrosoftTokens};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -24,6 +24,8 @@ pub enum AccountError {
     Http(#[from] reqwest::Error),
     #[error("keyring error: {0}")]
     Keyring(#[from] KeyringError),
+    #[error("auth error: {0}")]
+    Auth(#[from] microsoft_auth::AuthError),
     #[error("missing xbox user hash")]
     MissingUserHash,
     #[error("minecraft profile unavailable: {0}")]
@@ -56,6 +58,66 @@ pub struct Account {
 pub struct AccountStore {
     pub active: Option<Uuid>,
     pub accounts: Vec<Account>,
+}
+
+pub struct AccountService {
+    store: AccountStore,
+    auth: MicrosoftAuthenticator,
+    game: MicrosoftGameClient,
+}
+
+impl AccountService {
+    pub fn new(client_id: impl Into<String>) -> Result<Self, AccountError> {
+        Ok(Self {
+            store: AccountStore::load()?,
+            auth: MicrosoftAuthenticator::new(client_id),
+            game: MicrosoftGameClient::new()?,
+        })
+    }
+
+    pub fn accounts(&self) -> &AccountStore {
+        &self.store
+    }
+
+    pub fn set_active(&mut self, account_id: Uuid) -> Result<(), AccountError> {
+        if self.store.accounts.iter().any(|a| a.id == account_id) {
+            self.store.active = Some(account_id);
+            self.store.save()
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn remove_account(&mut self, account_id: Uuid) -> Result<(), AccountError> {
+        if let Some(pos) = self.store.accounts.iter().position(|a| a.id == account_id) {
+            if matches!(self.store.accounts[pos].kind, AccountKind::Microsoft { .. }) {
+                self.store.clear_microsoft_tokens(&account_id)?;
+            }
+            self.store.accounts.remove(pos);
+            if self.store.active == Some(account_id) {
+                self.store.active = None;
+            }
+            self.store.save()?;
+        }
+        Ok(())
+    }
+
+    pub fn add_offline(&mut self, username: String) -> Result<&Account, AccountError> {
+        self.store.add_offline(username)
+    }
+
+    pub fn start_microsoft_device_code(&self) -> Result<DeviceCodeInfo, AccountError> {
+        Ok(self.auth.start_device_code()?)
+    }
+
+    pub fn complete_microsoft_login(
+        &mut self,
+        code: &DeviceCodeInfo,
+    ) -> Result<&Account, AccountError> {
+        let tokens: MicrosoftTokens = self.auth.poll_device_code(code)?;
+        let session = self.game.minecraft_session(&tokens)?;
+        self.store.upsert_microsoft(&session)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

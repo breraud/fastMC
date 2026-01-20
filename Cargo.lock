@@ -1072,6 +1072,7 @@ dependencies = [
 name = "fastmc"
 version = "0.1.0"
 dependencies = [
+ "account_manager",
  "directories",
  "fastmc_config",
  "iced",
@@ -2067,6 +2068,15 @@ name = "itoa"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+
+[[package]]
+name = "java_manager"
+version = "0.1.0"
+dependencies = [
+ "fastmc_config",
+ "thiserror 1.0.69",
+ "uuid",
+]
 
 [[package]]
 name = "jni"
