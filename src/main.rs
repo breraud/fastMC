@@ -51,10 +51,18 @@ struct App {
     settings: SettingsScreen,
 }
 
+const DEV_MICROSOFT_CLIENT_ID: Option<&str> = Some("INSERT_YOUR_CLIENT_ID_HERE");
+
 impl Default for App {
     fn default() -> Self {
         let config = FastmcConfig::load().unwrap_or_default();
-        let account = AccountScreen::new(config.accounts.microsoft_client_id.clone());
+        let client_id = config
+            .accounts
+            .microsoft_client_id
+            .clone()
+            .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
+
+        let account = AccountScreen::new(client_id);
         let stage = if account.has_accounts() {
             Stage::Main
         } else {
