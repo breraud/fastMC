@@ -49,10 +49,10 @@ pub enum JavaError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DetectionSummary {
     pub installations: Vec<JavaInstallation>,
-    pub errors: Vec<JavaError>,
+    pub errors: Vec<String>,
 }
 
 pub fn detect_installations(config: &JavaDetectionConfig) -> DetectionSummary {
@@ -71,14 +71,14 @@ pub fn detect_installations(config: &JavaDetectionConfig) -> DetectionSummary {
             if matches!(source, InstallSource::UserProvided) {
                 summary
                     .errors
-                    .push(JavaError::BinaryMissing(normalized.display().to_string()));
+                    .push(JavaError::BinaryMissing(normalized.display().to_string()).to_string());
             }
             continue;
         }
 
         match inspect_binary(&normalized, source) {
             Ok(installation) => summary.installations.push(installation),
-            Err(err) => summary.errors.push(err),
+            Err(err) => summary.errors.push(err.to_string()),
         }
     }
 
@@ -97,7 +97,7 @@ fn candidate_binaries(config: &JavaDetectionConfig) -> Vec<(PathBuf, InstallSour
             candidates.push((PathBuf::from(java_home), InstallSource::JavaHome));
         }
 
-        if let Ok(path_var) = env::var_os("PATH") {
+        if let Some(path_var) = env::var_os("PATH") {
             for entry in env::split_paths(&path_var) {
                 candidates.push((entry, InstallSource::PathEntry));
             }
@@ -196,7 +196,50 @@ fn parse_java_metadata(stderr: &[u8], stdout: &[u8]) -> JavaMetadata {
         }
     }
 
+    if version.is_none() {
+        // Fallback: grab the first token that looks like a version (handles some older Java 8 outputs).
+        for line in stderr
+            .split(|b| *b == b'\n')
+            .chain(stdout.split(|b| *b == b'\n'))
+        {
+            let line = String::from_utf8_lossy(line);
+            for token in line.split_whitespace() {
+                if let Some(v) = strip_version_like(token) {
+                    version = Some(v);
+                    break;
+                }
+            }
+            if version.is_some() {
+                break;
+            }
+        }
+    }
+
     JavaMetadata { version, vendor }
+}
+
+fn strip_version_like(token: &str) -> Option<String> {
+    let mut digits = false;
+    let mut has_dot = false;
+    let mut cleaned = String::new();
+
+    for ch in token.chars() {
+        if ch.is_ascii_digit() || ch == '.' || ch == '_' {
+            if ch == '.' {
+                has_dot = true;
+            }
+            if ch.is_ascii_digit() {
+                digits = true;
+            }
+            cleaned.push(ch);
+        }
+    }
+
+    if digits && has_dot {
+        Some(cleaned)
+    } else {
+        None
+    }
 }
 
 fn platform_candidates() -> Vec<(PathBuf, InstallSource)> {

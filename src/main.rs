@@ -10,6 +10,7 @@ use theme::{icon_from_path, menu_button};
 
 use account_manager::AccountKind;
 use fastmc_config::FastmcConfig;
+use iced::window;
 
 #[derive(Clone)]
 pub enum Message {
@@ -21,6 +22,7 @@ pub enum Message {
     SettingsScreen(SettingsMessage),
     MenuItemSelected(MenuItem),
     AccountPressed,
+    Resized(f32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +68,7 @@ impl Default for App {
             play: PlayScreen::default(),
             server: ServerScreen,
             modpacks: ModpacksScreen,
-            java_manager: JavaManagerScreen,
+            java_manager: JavaManagerScreen::new(),
             settings: SettingsScreen,
         }
     }
@@ -96,8 +98,8 @@ impl App {
                 iced::Task::none()
             }
             Message::JavaManagerScreen(java_manager_message) => {
-                self.java_manager.update(java_manager_message);
-                iced::Task::none()
+                let task = self.java_manager.update(java_manager_message);
+                task.map(Message::JavaManagerScreen)
             }
             Message::SettingsScreen(settings_message) => {
                 self.settings.update(settings_message);
@@ -111,6 +113,10 @@ impl App {
             Message::AccountPressed => {
                 self.stage = Stage::AccountSetup;
                 iced::Task::none()
+            }
+            Message::Resized(width) => {
+                let task = self.java_manager.update(JavaManagerMessage::Resized(width));
+                task.map(Message::JavaManagerScreen)
             }
         }
     }
@@ -373,5 +379,6 @@ pub fn main() -> iced::Result {
     iced::application(App::default, App::update, App::view)
         .title("FastMC Launcher")
         .theme(iced::Theme::Dracula)
+        .subscription(|_| window::resize_events().map(|(_, size)| Message::Resized(size.width)))
         .run()
 }

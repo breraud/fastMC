@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-const CONFIG_VERSION: u32 = 2;
+const CONFIG_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -47,6 +47,9 @@ pub struct JavaConfig {
     /// Extra JVM arguments to append during launch.
     #[serde(default)]
     pub extra_jvm_args: Vec<String>,
+    /// Cached detected Java installations.
+    #[serde(default)]
+    pub detected_installations: Vec<JavaInstallationRecord>,
 }
 
 impl Default for JavaConfig {
@@ -57,6 +60,7 @@ impl Default for JavaConfig {
             min_memory_mb: default_min_memory_mb(),
             max_memory_mb: default_max_memory_mb(),
             extra_jvm_args: Vec::new(),
+            detected_installations: Vec::new(),
         }
     }
 }
@@ -160,4 +164,17 @@ fn default_max_memory_mb() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct JavaInstallationRecord {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub vendor: Option<String>,
+    /// Optional source hint ("Detected", "UserProvided", etc.).
+    #[serde(default)]
+    pub source: Option<String>,
 }

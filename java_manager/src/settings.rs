@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fastmc_config::JavaConfig;
+use fastmc_config::{JavaConfig, JavaInstallationRecord};
 
 use crate::detection::JavaDetectionConfig;
 
@@ -11,6 +11,7 @@ pub struct JavaLaunchSettings {
     pub min_memory_mb: u32,
     pub max_memory_mb: u32,
     pub extra_jvm_args: Vec<String>,
+    pub detected_installations: Vec<JavaInstallationRecord>,
 }
 
 impl JavaLaunchSettings {
@@ -49,6 +50,7 @@ impl JavaLaunchSettings {
             min_memory_mb: self.min_memory_mb,
             max_memory_mb: self.max_memory_mb,
             extra_jvm_args: self.extra_jvm_args.clone(),
+            detected_installations: self.detected_installations.clone(),
         }
     }
 }
@@ -61,6 +63,7 @@ impl From<&JavaConfig> for JavaLaunchSettings {
             min_memory_mb: config.min_memory_mb,
             max_memory_mb: config.max_memory_mb,
             extra_jvm_args: config.extra_jvm_args.clone(),
+            detected_installations: config.detected_installations.clone(),
         }
     }
 }
