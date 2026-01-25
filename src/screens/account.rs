@@ -60,6 +60,10 @@ impl AccountScreen {
         !self.store.accounts.is_empty()
     }
 
+    pub fn get_microsoft_tokens(&self, account_id: &Uuid) -> Option<account_manager::MicrosoftSecrets> {
+        self.store.microsoft_tokens(account_id).ok().flatten()
+    }
+
     pub fn active_account(&self) -> Option<&Account> {
         self.store
             .active
@@ -116,13 +120,18 @@ impl AccountScreen {
                 }
             }
             Message::MicrosoftCodeReady(result) => {
-                self.microsoft_in_progress = false;
                 match *result {
                     Ok(code) => {
                         self.error = None;
                         self.device_code = Some(code);
+                        // Trigger polling immediately
+                        return (
+                            AccountUpdate::None,
+                            Task::perform(async {}, |_| Message::MicrosoftComplete),
+                        );
                     }
                     Err(err) => {
+                        self.microsoft_in_progress = false;
                         self.error = Some(err);
                         self.device_code = None;
                     }
@@ -288,7 +297,7 @@ impl AccountScreen {
         let microsoft_box: Element<'_, Message> = if let Some(code) = &self.device_code {
             container(
                 column![
-                    text("Microsoft login in progress")
+                    text("Waiting for your login...")
                         .size(18)
                         .style(move |_| {
                             iced::widget::text::Style {
@@ -314,33 +323,11 @@ impl AccountScreen {
                             color: Some(text_muted),
                         })
                     },
-                    button(
-                        text("I've signed in").style(move |_| iced::widget::text::Style {
-                            color: Some(Color::WHITE),
+                    text("The launcher will automatically connect once you finish.")
+                        .size(14)
+                        .style(move |_| iced::widget::text::Style {
+                            color: Some(text_muted),
                         }),
-                    )
-                    .padding([12, 18])
-                    .on_press(Message::MicrosoftComplete)
-                    .style(move |_theme, status| {
-                        let base = Color::from_rgb(0.13, 0.77, 0.36);
-                        let hover = Color::from_rgb(0.12, 0.61, 0.30);
-                        iced::widget::button::Style {
-                            background: Some(
-                                match status {
-                                    iced::widget::button::Status::Hovered
-                                    | iced::widget::button::Status::Pressed => hover,
-                                    _ => base,
-                                }
-                                .into(),
-                            ),
-                            text_color: Color::WHITE,
-                            border: iced::Border {
-                                radius: 12.0.into(),
-                                ..iced::Border::default()
-                            },
-                            ..iced::widget::button::Style::default()
-                        }
-                    }),
                 ]
                 .spacing(10),
             )

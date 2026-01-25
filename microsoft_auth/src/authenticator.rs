@@ -24,13 +24,14 @@ impl MicrosoftAuthenticator {
         let request = self
             .client
             .exchange_device_code()
-            .map_err(|err| AuthError::OAuth(err.to_string()))?;
+            .map_err(|err| AuthError::OAuth(format!("{:?}", err)))?;
 
         let response: DeviceResponse = request
             .add_scope(Scope::new("XboxLive.signin".into()))
             .add_scope(Scope::new("offline_access".into()))
+            .add_scope(Scope::new("openid".into()))
             .request(http_client)
-            .map_err(|err| AuthError::OAuth(err.to_string()))?;
+            .map_err(|err| AuthError::OAuth(format!("{:?}", err)))?;
 
         let message = format!(
             "Visit {} and enter code {}",
@@ -50,8 +51,8 @@ impl MicrosoftAuthenticator {
             raw: response,
         })
     }
-
     pub fn poll_device_code(&self, code: &DeviceCodeInfo) -> Result<MicrosoftTokens, AuthError> {
+
         let token = self
             .client
             .exchange_device_access_token(&code.raw)
@@ -68,6 +69,29 @@ impl MicrosoftAuthenticator {
                 }
                 other => AuthError::OAuth(other.to_string()),
             })?;
+
+
+        let access_token = token.access_token().secret().to_owned();
+        let refresh_token = token
+            .refresh_token()
+            .map(|v| v.secret().to_owned())
+            .ok_or_else(|| AuthError::OAuth("missing refresh token".to_string()))?;
+        let expires_in = token
+            .expires_in()
+            .unwrap_or_else(|| Duration::from_secs(3600));
+
+        Ok(MicrosoftTokens {
+            access_token,
+            refresh_token,
+            expires_at: unix_timestamp_after(expires_in),
+        })
+    }
+    pub fn refresh_access_token(&self, refresh_token: &str) -> Result<MicrosoftTokens, AuthError> {
+        let token = self
+            .client
+            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.to_string()))
+            .request(http_client)
+            .map_err(|err| AuthError::OAuth(err.to_string()))?;
 
         let access_token = token.access_token().secret().to_owned();
         let refresh_token = token

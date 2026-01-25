@@ -5,6 +5,7 @@ use screens::{
     SettingsMessage, SettingsScreen,
 };
 
+mod game;
 mod theme;
 use theme::{icon_from_path, menu_button};
 
@@ -23,6 +24,8 @@ pub enum Message {
     MenuItemSelected(MenuItem),
     AccountPressed,
     Resized(f32),
+    Startup,
+    AccountValidated(Result<String, String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,10 +54,10 @@ struct App {
     settings: SettingsScreen,
 }
 
-const DEV_MICROSOFT_CLIENT_ID: Option<&str> = Some("INSERT_YOUR_CLIENT_ID_HERE");
+const DEV_MICROSOFT_CLIENT_ID: Option<&str> = Some("f9bf1dc0-bf65-42d6-a1af-f0aa35386a85");
 
-impl Default for App {
-    fn default() -> Self {
+impl App {
+    fn new() -> (Self, iced::Task<Message>) {
         let config = FastmcConfig::load().unwrap_or_default();
         let client_id = config
             .accounts
@@ -69,7 +72,7 @@ impl Default for App {
             Stage::AccountSetup
         };
 
-        Self {
+        let app = Self {
             stage,
             selected_menu: MenuItem::Play,
             account,
@@ -78,7 +81,9 @@ impl Default for App {
             modpacks: ModpacksScreen,
             java_manager: JavaManagerScreen::new(),
             settings: SettingsScreen,
-        }
+        };
+        
+        (app, iced::Task::done(Message::Startup))
     }
 }
 
@@ -94,8 +99,73 @@ impl App {
                 task.map(|msg| Message::AccountScreen(Box::new(msg)))
             }
             Message::PlayScreen(play_message) => {
-                self.play.update(play_message);
-                iced::Task::none()
+                let task = match play_message {
+                    PlayMessage::LaunchStarted => {
+                        let active_account = self.account.active_account().cloned();
+                        if let Some(account) = active_account {
+                            // Prepare secrets
+                            let secrets_result = if let AccountKind::Microsoft { .. } = &account.kind {
+                                self.account.get_microsoft_tokens(&account.id)
+                            } else {
+                                None
+                            };
+
+                            iced::Task::perform(async move {
+                                use directories::ProjectDirs;
+                                let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                let game_dir = dirs.data_dir().join("minecraft");
+                                
+                                // Detect Java
+                                let java_config = java_manager::JavaDetectionConfig::default();
+                                let summary = java_manager::detect_installations(&java_config);
+                                
+                                println!("Found {} Java installations:", summary.installations.len());
+                                for install in &summary.installations {
+                                    println!("- Path: {:?}, Version: {:?}", install.path, install.version);
+                                }
+
+                                let java_path = summary.installations.iter()
+                                    .find(|i| i.version.as_ref().map(|v| v.starts_with("21") || v.starts_with("22") || v.starts_with("23")).unwrap_or(false))
+                                    .map(|i| i.path.clone())
+                                    .or_else(|| {
+                                        // Fallback to searching for *any* Java if 21 isn't explicitly found,
+                                        // essentially trusting the user's PATH or JAVA_HOME might be newer than what capture suggests,
+                                        // or picking the "best" available.
+                                        // For now, let's look for the highest version we can parse.
+                                        summary.installations.iter()
+                                            .max_by_key(|i| {
+                                                i.version.as_ref()
+                                                    .and_then(|v| v.split(|c: char| !c.is_numeric()).next()) // Grab first numeric component
+                                                    .and_then(|s| s.parse::<i32>().ok())
+                                                    .unwrap_or(0)
+                                            })
+                                            .map(|i| i.path.clone())
+                                    })
+                                    .unwrap_or_else(|| std::path::PathBuf::from("java"));
+
+                                println!("Selected Java path: {:?}", java_path);
+
+                                let access_token = secrets_result.map(|s| s.access_token).unwrap_or_default();
+                                
+                                match game::prepare_and_launch(&account, &access_token, java_path, game_dir) {
+                                    Ok(mut cmd) => {
+                                        match cmd.spawn() {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => Err(format!("Failed to start process: {}", e)),
+                                        }
+                                    }
+                                    Err(e) => Err(e),
+                                }
+
+                            }, |res| Message::PlayScreen(PlayMessage::LaunchFinished(res)))
+                        
+                        } else {
+                            iced::Task::done(Message::PlayScreen(PlayMessage::LaunchFinished(Err("No active account".to_string()))))
+                        }
+                    }
+                    _ => self.play.update(play_message).map(Message::PlayScreen),
+                };
+                task
             }
             Message::ServerScreen(server_message) => {
                 self.server.update(server_message);
@@ -125,6 +195,39 @@ impl App {
             Message::Resized(width) => {
                 let task = self.java_manager.update(JavaManagerMessage::Resized(width));
                 task.map(Message::JavaManagerScreen)
+            }
+            Message::Startup => {
+                let config = FastmcConfig::load().unwrap_or_default();
+                let client_id = config.accounts.microsoft_client_id.clone()
+                    .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
+                
+                iced::Task::perform(async move {
+                     if let Some(cid) = client_id {
+                         use account_manager::AccountService;
+                         let mut service = AccountService::new(cid).map_err(|e| e.to_string())?;
+                         let account = service.validate_active_account().map_err(|e| e.to_string())?;
+                         Ok(account.display_name.clone())
+                     } else {
+                         // No client ID means we can't validate Microsoft accounts, 
+                         // but we might not have one active. 
+                         // For now, just assume success or return a distinctive message.
+                         Ok("Offline/NoID".to_string())
+                     }
+                }, Message::AccountValidated)
+            }
+            Message::AccountValidated(result) => {
+                match result {
+                    Ok(name) => {
+                         println!("Welcome back, {}", name);
+                         // Potentially show a toast or notification here
+                    }
+                    Err(e) => {
+                        println!("Account validation failed: {}", e);
+                        // If validation fails, force back to account setup
+                        self.stage = Stage::AccountSetup;
+                    }
+                }
+                iced::Task::none()
             }
         }
     }
@@ -384,7 +487,7 @@ impl App {
 }
 
 pub fn main() -> iced::Result {
-    iced::application(App::default, App::update, App::view)
+    iced::application(App::new, App::update, App::view)
         .title("FastMC Launcher")
         .theme(iced::Theme::Dracula)
         .subscription(|_| window::resize_events().map(|(_, size)| Message::Resized(size.width)))

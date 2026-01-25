@@ -118,6 +118,31 @@ impl AccountService {
         let session = self.game.minecraft_session(&tokens)?;
         self.store.upsert_microsoft(&session)
     }
+    pub fn refresh_account(&mut self, account_id: &Uuid) -> Result<&Account, AccountError> {
+        let secrets = load_microsoft_tokens(account_id)?
+            .ok_or_else(|| AccountError::Auth(microsoft_auth::AuthError::OAuth("no tokens found".to_string())))?;
+
+        let tokens = self.auth.refresh_access_token(&secrets.refresh_token)?;
+        let session = self.game.minecraft_session(&tokens)?;
+        self.store.upsert_microsoft(&session)
+    }
+
+    pub fn validate_active_account(&mut self) -> Result<&Account, AccountError> {
+        let active_id = self.store.active.ok_or(AccountError::ProfileUnavailable("No active account".to_string()))?;
+        
+        // Find the account kind without holding a reference to self.store for too long
+        let is_microsoft = {
+            let account = self.store.accounts.iter().find(|a| a.id == active_id)
+                .ok_or(AccountError::ProfileUnavailable("Active account not found in store".to_string()))?;
+            matches!(account.kind, AccountKind::Microsoft { .. })
+        };
+
+        if is_microsoft {
+            self.refresh_account(&active_id)
+        } else {
+             Ok(self.store.accounts.iter().find(|a| a.id == active_id).unwrap())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,6 +289,7 @@ impl MicrosoftGameClient {
 
 #[derive(Debug, Deserialize)]
 struct XboxAuthResponse {
+    #[serde(rename = "Token")]
     token: String,
     #[serde(rename = "DisplayClaims")]
     display_claims: XboxDisplayClaims,
@@ -494,9 +520,9 @@ fn store_microsoft_tokens(
     session: &MinecraftSession,
 ) -> Result<(), AccountError> {
     let secrets = MicrosoftSecrets {
-        access_token: session.access_token.clone(),
+        access_token: String::new(), // Too large for Windows keyring; rely on refresh_token
         refresh_token: session.refresh_token.clone(),
-        expires_at: session.expires_at,
+        expires_at: 0,
     };
 
     let entry = keyring_entry(&account_id)?;

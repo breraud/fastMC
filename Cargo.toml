@@ -13,6 +13,7 @@ microsoft_auth = {path = "./microsoft_auth"}
 fastmc_config = {path = "./config"}
 account_manager = {path = "./account_manager"}
 java_manager = {path = "./java_manager"}
+launcher = {path = "./launcher"}
 rfd = "0.14"
 directories = "5.0"
 reqwest = {version = "0.11.24", features = ["json", "blocking"]}
@@ -20,3 +21,4 @@ serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 uuid = {version = "1.10", features = ["v3", "v4", "v5", "serde"]}
 md-5 = "0.10"
+zip = "0.6"
