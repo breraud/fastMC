@@ -192,13 +192,24 @@ pub fn prepare_and_launch(
 
         // Natives
         if let Some(classifiers) = lib.downloads.classifiers {
-            // For Windows, we look for "natives-windows"
-            if let Some(native_obj) = classifiers.get("natives-windows") {
+            // Determine the current OS classifier
+            let os_classifier = if cfg!(target_os = "windows") {
+                "natives-windows"
+            } else if cfg!(target_os = "macos") {
+                "natives-macos"
+            } else if cfg!(target_os = "linux") {
+                "natives-linux"
+            } else {
+                "natives-unknown"
+            };
+
+            if let Some(native_obj) = classifiers.get(os_classifier) {
                 // Deserialize manually or assume structure
                 if let Ok(file_info) = serde_json::from_value::<DownloadFile>(native_obj.clone()) {
                     // Download native jar
                     let nat_path =
-                        libraries_dir.join(format!("{}-native.jar", lib.name.replace(':', "-")));
+                        libraries_dir.join(format!("{}-{}.jar", lib.name.replace(':', "-"), os_classifier));
+                    
                     if !nat_path.exists() {
                         download_file(&file_info.url, &nat_path)?;
                     }

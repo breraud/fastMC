@@ -86,6 +86,7 @@ pub struct VanillaLaunchConfig {
 impl VanillaLaunchConfig {
     pub fn build_command(&self, auth: &LaunchAuth) -> Command {
         let mut cmd = Command::new(&self.java_path);
+        cmd.current_dir(&self.game_dir);
 
         if let Some(memory) = &self.memory {
             cmd.arg(format!("-Xms{}M", memory.min_megabytes))

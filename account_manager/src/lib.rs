@@ -158,7 +158,8 @@ impl AccountService {
                         .unwrap_or_default()
                         .as_secs();
                     // buffer of 5 minutes (300 seconds)
-                    secrets.expires_at < now + 300
+                    // Also force refresh if the stored access token is empty (as expected with our storage logic)
+                    secrets.expires_at < now + 300 || secrets.access_token.is_empty()
                 }
                 None => true,
             };
@@ -585,7 +586,10 @@ fn store_microsoft_tokens(
     session: &MinecraftSession,
 ) -> Result<(), AccountError> {
     let secrets = MicrosoftSecrets {
+        #[cfg(target_os = "windows")]
         access_token: String::new(), // Too large for Windows keyring; rely on refresh_token
+        #[cfg(not(target_os = "windows"))]
+        access_token: session.access_token.clone(),
         refresh_token: session.refresh_token.clone(),
         expires_at: session.expires_at,
     };
