@@ -131,7 +131,8 @@ impl App {
                 ])
             }
             Message::PlayScreen(play_message) => {
-                let task = match play_message {
+                
+                match play_message {
                     PlayMessage::LaunchStarted => {
                         let active_account = self.account.active_account().cloned();
                         if let Some(account) = active_account {
@@ -237,8 +238,7 @@ impl App {
                         }
                     }
                     _ => self.play.update(play_message).map(Message::PlayScreen),
-                };
-                task
+                }
             }
             Message::ServerScreen(server_message) => {
                 self.server.update(server_message);

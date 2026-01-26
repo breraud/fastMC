@@ -2,7 +2,7 @@ use account_manager::Account;
 use launcher::{LaunchAuth, MemorySettings, Resolution, VanillaLaunchConfig};
 use serde::Deserialize;
 use std::fs;
-use std::io::{self, Cursor};
+use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -240,8 +240,8 @@ pub fn prepare_and_launch(
     if let Some(objects) = index_data["objects"].as_object() {
         let objects_dir = assets_dir.join("objects");
         for (_name, obj) in objects {
-            if let Some(hash) = obj["hash"].as_str() {
-                if hash.len() >= 2 {
+            if let Some(hash) = obj["hash"].as_str()
+                && hash.len() >= 2 {
                     let prefix = &hash[..2];
                     let object_path = objects_dir.join(prefix).join(hash);
 
@@ -263,7 +263,6 @@ pub fn prepare_and_launch(
                         }
                     }
                 }
-            }
         }
     }
 

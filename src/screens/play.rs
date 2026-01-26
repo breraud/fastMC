@@ -1,7 +1,5 @@
 use iced::widget::{button, column, container, text};
 use iced::{Alignment, Color, Element, Length, Task};
-use launcher::LaunchAuth;
-use std::process::Stdio;
 
 #[derive(Debug, Clone)]
 pub enum Message {
