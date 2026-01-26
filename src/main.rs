@@ -131,7 +131,6 @@ impl App {
                 ])
             }
             Message::PlayScreen(play_message) => {
-                
                 match play_message {
                     PlayMessage::LaunchStarted => {
                         let active_account = self.account.active_account().cloned();

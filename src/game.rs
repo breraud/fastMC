@@ -248,28 +248,29 @@ pub fn prepare_and_launch(
         let objects_dir = assets_dir.join("objects");
         for (_name, obj) in objects {
             if let Some(hash) = obj["hash"].as_str()
-                && hash.len() >= 2 {
-                    let prefix = &hash[..2];
-                    let object_path = objects_dir.join(prefix).join(hash);
+                && hash.len() >= 2
+            {
+                let prefix = &hash[..2];
+                let object_path = objects_dir.join(prefix).join(hash);
 
-                    if !object_path.exists() {
-                        let url = format!(
-                            "https://resources.download.minecraft.net/{}/{}",
-                            prefix, hash
-                        );
-                        if let Some(parent) = object_path.parent() {
-                            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                        }
-                        // Use a lighter download function or silent one to avoid spamming console for 1000s of assets
-                        // For now we assume standard download_file but maybe suppress log if too spammy
-                        // Let's just download it.
-                        // println!("Downloading asset {}", hash);
-                        match download_file(&url, &object_path) {
-                            Ok(_) => {}
-                            Err(e) => println!("Failed to download asset {}: {}", hash, e),
-                        }
+                if !object_path.exists() {
+                    let url = format!(
+                        "https://resources.download.minecraft.net/{}/{}",
+                        prefix, hash
+                    );
+                    if let Some(parent) = object_path.parent() {
+                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                    // Use a lighter download function or silent one to avoid spamming console for 1000s of assets
+                    // For now we assume standard download_file but maybe suppress log if too spammy
+                    // Let's just download it.
+                    // println!("Downloading asset {}", hash);
+                    match download_file(&url, &object_path) {
+                        Ok(_) => {}
+                        Err(e) => println!("Failed to download asset {}: {}", hash, e),
                     }
                 }
+            }
         }
     }
 

@@ -173,12 +173,13 @@ fn parse_java_metadata(stderr: &[u8], stdout: &[u8]) -> JavaMetadata {
         let lower = line.to_lowercase();
 
         if version.is_none()
-            && let Some(idx) = line.find("version \"") {
-                let tail = &line[idx + 9..];
-                if let Some(end) = tail.find('"') {
-                    version = Some(tail[..end].to_string());
-                }
+            && let Some(idx) = line.find("version \"")
+        {
+            let tail = &line[idx + 9..];
+            if let Some(end) = tail.find('"') {
+                version = Some(tail[..end].to_string());
             }
+        }
 
         if vendor.is_none() {
             vendor = match () {

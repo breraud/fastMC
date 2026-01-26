@@ -411,78 +411,21 @@ impl AccountScreen {
                 col.push(self.account_row(account, text_primary, text_muted, surface))
             });
 
-            let scrollbar = scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().spacing(8.0).margin(6.0),
-            );
-
-            let list = scrollable(accounts.spacing(12))
-                .height(Length::Fixed(320.0))
-                .width(Length::Fill)
-                .direction(scrollbar)
-                .style(move |_theme, status| {
-                    let (rail_bg, scroller_bg) = match status {
-                        scrollable::Status::Hovered { .. } | scrollable::Status::Dragged { .. } => {
-                            (None, Color::from_rgba(accent.r, accent.g, accent.b, 0.45))
-                        }
-                        _ => (None, Color::from_rgba(0.82, 0.84, 0.87, 0.18)),
-                    };
-
-                    iced::widget::scrollable::Style {
-                        container: iced::widget::container::Style::default(),
-                        vertical_rail: iced::widget::scrollable::Rail {
-                            background: rail_bg.map(Background::Color),
-                            border: Border {
-                                radius: 5.0.into(),
-                                width: 0.0,
-                                color: Color::TRANSPARENT,
-                            },
-                            scroller: iced::widget::scrollable::Scroller {
-                                background: Background::Color(scroller_bg),
-                                border: Border {
-                                    radius: 8.0.into(),
-                                    width: 0.0,
-                                    color: Color::TRANSPARENT,
-                                },
-                            },
-                        },
-                        horizontal_rail: iced::widget::scrollable::Rail {
-                            background: None,
-                            border: Border::default(),
-                            scroller: iced::widget::scrollable::Scroller {
-                                background: Background::Color(Color::TRANSPARENT),
-                                border: Border::default(),
-                            },
-                        },
-                        gap: None,
-                        auto_scroll: iced::widget::scrollable::AutoScroll {
-                            background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.65)),
-                            border: Border::default(),
-                            shadow: Shadow::default(),
-                            icon: Color::WHITE,
-                        },
-                    }
-                });
+            let list = accounts.spacing(12);
 
             column![header, list].spacing(12).into()
         };
 
-        let mut layout = column![
-            heading,
-            description,
-            accounts_list,
-            input_row,
-            row![add_offline, add_microsoft].spacing(12),
-            microsoft_box
-        ]
-        .spacing(20)
-        .align_x(Alignment::Center)
-        .max_width(680);
+        let mut content = column![heading, description, accounts_list, microsoft_box]
+            .spacing(20)
+            .align_x(Alignment::Center)
+            .max_width(680);
 
         if let Some(error) = error_banner {
-            layout = layout.push(error);
+            content = content.push(error);
         }
 
-        layout = layout.push(
+        let back_button =
             button(
                 text("Back to launcher").style(move |_| iced::widget::text::Style {
                     color: Some(text_primary),
@@ -505,14 +448,96 @@ impl AccountScreen {
                     ..iced::widget::button::Style::default()
                 }
             })
-            .on_press(Message::BackToLauncher),
-        );
+            .on_press(Message::BackToLauncher);
+
+        let footer = column![
+            input_row,
+            row![add_offline, add_microsoft].spacing(12),
+            back_button
+        ]
+        .spacing(20)
+        .align_x(Alignment::Center)
+        .max_width(680);
+
+        let style_scroll = |_theme: &iced::Theme, status: scrollable::Status| {
+            let accent = Color::from_rgb(0.13, 0.77, 0.36);
+            let (_rail_bg, scroller_bg) = match status {
+                scrollable::Status::Hovered { .. } | scrollable::Status::Dragged { .. } => (
+                    Option::<Background>::None,
+                    Color::from_rgba(accent.r, accent.g, accent.b, 0.45),
+                ),
+                _ => (
+                    Option::<Background>::None,
+                    Color::from_rgba(0.82, 0.84, 0.87, 0.18),
+                ),
+            };
+
+            iced::widget::scrollable::Style {
+                container: iced::widget::container::Style::default(),
+                vertical_rail: iced::widget::scrollable::Rail {
+                    background: None,
+                    border: Border {
+                        radius: 5.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    scroller: iced::widget::scrollable::Scroller {
+                        background: Background::Color(scroller_bg),
+                        border: Border {
+                            radius: 8.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                    },
+                },
+                horizontal_rail: iced::widget::scrollable::Rail {
+                    background: None,
+                    border: Border::default(),
+                    scroller: iced::widget::scrollable::Scroller {
+                        background: Background::Color(Color::TRANSPARENT),
+                        border: Border::default(),
+                    },
+                },
+                gap: None,
+                auto_scroll: iced::widget::scrollable::AutoScroll {
+                    background: Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.65)),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    icon: Color::WHITE,
+                },
+            }
+        };
+
+        // Constrain the scrolling area to strictly fit the content width + padding.
+        // using Fixed width ensures the scrollbar is exactly where we want it.
+        // Inner container fills height and centers content vertically.
+        let scrollable_area = scrollable(
+            container(content)
+                .padding(10)
+                .align_x(Alignment::Center)
+                .height(Length::Fill)
+                .align_y(Alignment::Center),
+        )
+        .height(Length::Fill)
+        .width(Length::Fixed(720.0))
+        .style(style_scroll);
+
+        let layout = column![
+            container(scrollable_area)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(Alignment::Center),
+            container(footer)
+                .width(Length::Fill)
+                .align_x(Alignment::Center)
+        ]
+        .spacing(10)
+        .align_x(Alignment::Center);
 
         container(layout)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
             .padding(24)
             .style(move |_| iced::widget::container::Style {
                 background: Some(background.into()),
@@ -577,14 +602,45 @@ impl AccountScreen {
         .spacing(4);
 
         let select_button = if account.requires_login {
-            button(text("Re-login").style(move |_| iced::widget::text::Style {
-                color: Some(Color::WHITE),
-            }))
+            // Need to clone badge and details for use here since they were created above
+            // Actually, we can just rebuild the row or clone the content if easier.
+            // Since Element isn't clone, we have to reconstruct the widgets or wrap them in a function.
+            // But wait, `badge` and `details` are consumed by the else branch or this branch.
+            // So we can just reuse them in both branches if we move the creation down or conditionally build the button content.
+
+            // Let's reuse the badge/details logic.
+            // We can just construct the row here.
+
+            button(
+                row![
+                    badge,
+                    details,
+                    iced::widget::Space::new().width(Length::Fill),
+                    container(text("Re-login").size(14).style(move |_| {
+                        iced::widget::text::Style {
+                            color: Some(Color::WHITE),
+                        }
+                    }))
+                    .padding([6, 12])
+                    .style(move |_| iced::widget::container::Style {
+                        background: Some(Color::from_rgb(0.8, 0.4, 0.0).into()),
+                        border: iced::Border {
+                            radius: 20.0.into(),
+                            ..iced::Border::default()
+                        },
+                        ..iced::widget::container::Style::default()
+                    })
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
             .padding([12, 14])
             .width(Length::Fill)
             .style(move |_theme, status| {
-                let base = Color::from_rgb(0.8, 0.4, 0.0);
-                let hover = Color::from_rgb(0.9, 0.5, 0.0);
+                // Use standard surface colors for the row background,
+                // so the orange button stands out as the ACTION.
+                let base = surface;
+                let hover = Color::from_rgb(0.20, 0.20, 0.23);
                 iced::widget::button::Style {
                     background: Some(
                         match status {
@@ -594,7 +650,7 @@ impl AccountScreen {
                         }
                         .into(),
                     ),
-                    text_color: Color::WHITE,
+                    text_color: text_primary,
                     border: iced::Border {
                         radius: 12.0.into(),
                         ..iced::Border::default()
