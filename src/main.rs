@@ -1,16 +1,18 @@
 mod screens;
 use screens::{
-    AccountMessage, AccountScreen, AccountUpdate, JavaManagerMessage, JavaManagerScreen,
-    ModpacksMessage, ModpacksScreen, PlayMessage, PlayScreen, ServerMessage, ServerScreen,
-    SettingsMessage, SettingsScreen,
+    AccountMessage, AccountScreen, AccountUpdate, InstancesMessage, InstancesScreen,
+    JavaManagerMessage, JavaManagerScreen, ModpacksMessage, ModpacksScreen, PlayMessage, PlayScreen,
+    ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
 };
 
 mod game;
 mod theme;
 use theme::{icon_from_path, menu_button};
 
+pub mod instance_manager;
+
 use account_manager::AccountKind;
-use fastmc_config::FastmcConfig;
+use config_manager::FastmcConfig;
 use iced::window;
 
 #[derive(Clone)]
@@ -20,6 +22,7 @@ pub enum Message {
     ServerScreen(ServerMessage),
     ModpacksScreen(ModpacksMessage),
     JavaManagerScreen(JavaManagerMessage),
+    InstancesScreen(InstancesMessage),
     SettingsScreen(SettingsMessage),
     MenuItemSelected(MenuItem),
     AccountPressed,
@@ -40,6 +43,7 @@ pub enum MenuItem {
     Server,
     Modpacks,
     JavaManager,
+    Instances,
     Settings,
 }
 
@@ -50,7 +54,9 @@ struct App {
     play: PlayScreen,
     server: ServerScreen,
     modpacks: ModpacksScreen,
+
     java_manager: JavaManagerScreen,
+    instances: InstancesScreen,
     settings: SettingsScreen,
 }
 
@@ -79,7 +85,9 @@ impl App {
             play: PlayScreen::default(),
             server: ServerScreen,
             modpacks: ModpacksScreen,
+
             java_manager: JavaManagerScreen::new(),
+            instances: InstancesScreen::new(),
             settings: SettingsScreen,
         };
 
@@ -251,6 +259,10 @@ impl App {
                 let task = self.java_manager.update(java_manager_message);
                 task.map(Message::JavaManagerScreen)
             }
+            Message::InstancesScreen(instances_message) => {
+                let task = self.instances.update(instances_message);
+                task.map(Message::InstancesScreen)
+            }
             Message::SettingsScreen(settings_message) => {
                 self.settings.update(settings_message);
                 iced::Task::none()
@@ -258,6 +270,12 @@ impl App {
             Message::MenuItemSelected(item) => {
                 self.stage = Stage::Main;
                 self.selected_menu = item;
+                
+                if item == MenuItem::Instances {
+                     let task = self.instances.refresh();
+                     return task.map(Message::InstancesScreen);
+                }
+                
                 iced::Task::none()
             }
             Message::AccountPressed => {
@@ -344,6 +362,7 @@ impl App {
             MenuItem::Server => self.server.view().map(Message::ServerScreen),
             MenuItem::Modpacks => self.modpacks.view().map(Message::ModpacksScreen),
             MenuItem::JavaManager => self.java_manager.view().map(Message::JavaManagerScreen),
+            MenuItem::Instances => self.instances.view().map(Message::InstancesScreen),
             MenuItem::Settings => self.settings.view().map(Message::SettingsScreen),
         };
         let content_area = iced::widget::container(content)
@@ -367,6 +386,11 @@ impl App {
                 MenuItem::JavaManager,
                 "Java Manager",
                 "assets/svg/coffee.svg",
+            ),
+            (
+                MenuItem::Instances,
+                "Instances",
+                "assets/svg/package.svg", // Reusing package icon for now or use a new one
             ),
             (MenuItem::Settings, "Settings", "assets/svg/settings.svg"),
         ];

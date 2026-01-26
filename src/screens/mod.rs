@@ -11,3 +11,5 @@ pub use modpacks::{Message as ModpacksMessage, ModpacksScreen};
 pub use play::{Message as PlayMessage, PlayScreen};
 pub use server::{Message as ServerMessage, ServerScreen};
 pub use settings::{Message as SettingsMessage, SettingsScreen};
+pub mod instances;
+pub use instances::{InstancesScreen, Message as InstancesMessage};

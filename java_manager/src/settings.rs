@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fastmc_config::{JavaConfig, JavaInstallationRecord};
+use config_manager::{JavaConfig, JavaInstallationRecord};
 
 use crate::detection::JavaDetectionConfig;
 

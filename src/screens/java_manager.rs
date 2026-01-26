@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use fastmc_config::{FastmcConfig, JavaInstallationRecord};
+use config_manager::{FastmcConfig, JavaInstallationRecord};
 use iced::widget::{
     Space, button, column, container, row, scrollable, slider, text, text_editor, text_input,
 };

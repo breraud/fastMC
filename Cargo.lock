@@ -755,6 +755,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "config_manager"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1154,8 +1165,8 @@ name = "fastmc"
 version = "0.1.0"
 dependencies = [
  "account_manager",
+ "config_manager",
  "directories",
- "fastmc_config",
  "iced",
  "java_manager",
  "launcher",
@@ -1167,17 +1178,6 @@ dependencies = [
  "serde_json",
  "uuid",
  "zip",
-]
-
-[[package]]
-name = "fastmc_config"
-version = "0.1.0"
-dependencies = [
- "directories",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2158,7 +2158,7 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 name = "java_manager"
 version = "0.1.0"
 dependencies = [
- "fastmc_config",
+ "config_manager",
  "thiserror 1.0.69",
  "uuid",
 ]

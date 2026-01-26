@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["account_manager","config", "launcher","microsoft_auth","java_manager"]
+members = ["account_manager","config_manager", "launcher","microsoft_auth","java_manager"]
 
 [package]
 name = "fastmc"
@@ -10,7 +10,7 @@ edition = "2024"
 [dependencies]
 iced = {version="0.14.0", features = ["svg"]}
 microsoft_auth = {path = "./microsoft_auth"}
-fastmc_config = {path = "./config"}
+config_manager = {path = "./config_manager"}
 account_manager = {path = "./account_manager"}
 java_manager = {path = "./java_manager"}
 launcher = {path = "./launcher"}
