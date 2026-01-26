@@ -6,17 +6,20 @@ use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[allow(dead_code)]
 pub enum LaunchProgress {
     Downloading(String, f32), // File, percentage
     Extracting,
     Launching,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct VersionManifest {
     versions: Vec<VersionEntry>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct VersionEntry {
     id: String,
@@ -26,9 +29,11 @@ struct VersionEntry {
 #[derive(Debug, Deserialize)]
 struct VersionData {
     libraries: Vec<Library>,
-    mainClass: String,
+    #[serde(rename = "mainClass")]
+    main_class: String,
     downloads: VersionDownloads,
-    assetIndex: AssetIndexRef,
+    #[serde(rename = "assetIndex")]
+    asset_index: AssetIndexRef,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +50,9 @@ struct VersionDownloads {
 #[derive(Debug, Deserialize, Clone)]
 struct DownloadFile {
     url: String,
+    #[allow(dead_code)]
     sha1: String,
+    #[allow(dead_code)]
     size: u64,
     path: Option<String>,
 }
@@ -225,10 +232,10 @@ pub fn prepare_and_launch(
     // 5. Assets Index and Objects
     let asset_index_path = assets_dir
         .join("indexes")
-        .join(format!("{}.json", version_data.assetIndex.id));
+        .join(format!("{}.json", version_data.asset_index.id));
     if !asset_index_path.exists() {
         fs::create_dir_all(asset_index_path.parent().unwrap()).map_err(|e| e.to_string())?;
-        download_file(&version_data.assetIndex.url, &asset_index_path)?;
+        download_file(&version_data.asset_index.url, &asset_index_path)?;
     }
 
     // Process Asset Index to download actual objects
@@ -272,9 +279,9 @@ pub fn prepare_and_launch(
         game_dir: game_dir.clone(),
         assets_dir,
         classpath,
-        main_class: version_data.mainClass,
+        main_class: version_data.main_class,
         version_name: version_id.to_string(),
-        asset_index: Some(version_data.assetIndex.id),
+        asset_index: Some(version_data.asset_index.id),
         resolution: Some(Resolution {
             width: 854,
             height: 480,
