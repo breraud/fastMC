@@ -82,7 +82,7 @@ impl App {
             java_manager: JavaManagerScreen::new(),
             settings: SettingsScreen,
         };
-        
+
         (app, iced::Task::done(Message::Startup))
     }
 }
@@ -92,75 +92,148 @@ impl App {
         match message {
             Message::AccountScreen(account_message) => {
                 let (action, task) = self.account.update(*account_message);
-                if matches!(action, AccountUpdate::EnterLauncher) && self.account.has_accounts() {
-                    self.stage = Stage::Main;
-                }
 
-                task.map(|msg| Message::AccountScreen(Box::new(msg)))
+                let navigation_task = if matches!(action, AccountUpdate::EnterLauncher)
+                    && self.account.has_accounts()
+                {
+                    let config = FastmcConfig::load().unwrap_or_default();
+                    let client_id = config
+                        .accounts
+                        .microsoft_client_id
+                        .clone()
+                        .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
+
+                    iced::Task::perform(
+                        async move {
+                            if let Some(cid) = client_id {
+                                use account_manager::AccountService;
+                                // We re-instantiate service here for validation.
+                                // In a real app we might want shared state, but this is safe for now.
+                                let mut service =
+                                    AccountService::new(cid).map_err(|e| e.to_string())?;
+                                let account = service
+                                    .validate_active_account()
+                                    .map_err(|e| e.to_string())?;
+                                Ok(account.display_name.clone())
+                            } else {
+                                Ok("Offline/NoID".to_string())
+                            }
+                        },
+                        Message::AccountValidated,
+                    )
+                } else {
+                    iced::Task::none()
+                };
+
+                iced::Task::batch(vec![
+                    task.map(|msg| Message::AccountScreen(Box::new(msg))),
+                    navigation_task,
+                ])
             }
             Message::PlayScreen(play_message) => {
                 let task = match play_message {
                     PlayMessage::LaunchStarted => {
                         let active_account = self.account.active_account().cloned();
                         if let Some(account) = active_account {
+                            if account.requires_login {
+                                // Prevent launch if login required
+                                // Ideally we would switch to AccountSetup stage here too
+                                self.stage = Stage::AccountSetup;
+                                return iced::Task::none();
+                            }
+
                             // Prepare secrets
-                            let secrets_result = if let AccountKind::Microsoft { .. } = &account.kind {
-                                self.account.get_microsoft_tokens(&account.id)
-                            } else {
-                                None
-                            };
+                            let secrets_result =
+                                if let AccountKind::Microsoft { .. } = &account.kind {
+                                    self.account.get_microsoft_tokens(&account.id)
+                                } else {
+                                    None
+                                };
 
-                            iced::Task::perform(async move {
-                                use directories::ProjectDirs;
-                                let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
-                                let game_dir = dirs.data_dir().join("minecraft");
-                                
-                                // Detect Java
-                                let java_config = java_manager::JavaDetectionConfig::default();
-                                let summary = java_manager::detect_installations(&java_config);
-                                
-                                println!("Found {} Java installations:", summary.installations.len());
-                                for install in &summary.installations {
-                                    println!("- Path: {:?}, Version: {:?}", install.path, install.version);
-                                }
+                            iced::Task::perform(
+                                async move {
+                                    use directories::ProjectDirs;
+                                    let dirs =
+                                        ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                    let game_dir = dirs.data_dir().join("minecraft");
 
-                                let java_path = summary.installations.iter()
-                                    .find(|i| i.version.as_ref().map(|v| v.starts_with("21") || v.starts_with("22") || v.starts_with("23")).unwrap_or(false))
-                                    .map(|i| i.path.clone())
-                                    .or_else(|| {
-                                        // Fallback to searching for *any* Java if 21 isn't explicitly found,
-                                        // essentially trusting the user's PATH or JAVA_HOME might be newer than what capture suggests,
-                                        // or picking the "best" available.
-                                        // For now, let's look for the highest version we can parse.
-                                        summary.installations.iter()
-                                            .max_by_key(|i| {
-                                                i.version.as_ref()
-                                                    .and_then(|v| v.split(|c: char| !c.is_numeric()).next()) // Grab first numeric component
-                                                    .and_then(|s| s.parse::<i32>().ok())
-                                                    .unwrap_or(0)
-                                            })
-                                            .map(|i| i.path.clone())
-                                    })
-                                    .unwrap_or_else(|| std::path::PathBuf::from("java"));
+                                    // Detect Java
+                                    let java_config = java_manager::JavaDetectionConfig::default();
+                                    let summary = java_manager::detect_installations(&java_config);
 
-                                println!("Selected Java path: {:?}", java_path);
-
-                                let access_token = secrets_result.map(|s| s.access_token).unwrap_or_default();
-                                
-                                match game::prepare_and_launch(&account, &access_token, java_path, game_dir) {
-                                    Ok(mut cmd) => {
-                                        match cmd.spawn() {
-                                            Ok(_) => Ok(()),
-                                            Err(e) => Err(format!("Failed to start process: {}", e)),
-                                        }
+                                    println!(
+                                        "Found {} Java installations:",
+                                        summary.installations.len()
+                                    );
+                                    for install in &summary.installations {
+                                        println!(
+                                            "- Path: {:?}, Version: {:?}",
+                                            install.path, install.version
+                                        );
                                     }
-                                    Err(e) => Err(e),
-                                }
 
-                            }, |res| Message::PlayScreen(PlayMessage::LaunchFinished(res)))
-                        
+                                    let java_path = summary
+                                        .installations
+                                        .iter()
+                                        .find(|i| {
+                                            i.version
+                                                .as_ref()
+                                                .map(|v| {
+                                                    v.starts_with("21")
+                                                        || v.starts_with("22")
+                                                        || v.starts_with("23")
+                                                })
+                                                .unwrap_or(false)
+                                        })
+                                        .map(|i| i.path.clone())
+                                        .or_else(|| {
+                                            // Fallback to searching for *any* Java if 21 isn't explicitly found,
+                                            // essentially trusting the user's PATH or JAVA_HOME might be newer than what capture suggests,
+                                            // or picking the "best" available.
+                                            // For now, let's look for the highest version we can parse.
+                                            summary
+                                                .installations
+                                                .iter()
+                                                .max_by_key(|i| {
+                                                    i.version
+                                                        .as_ref()
+                                                        .and_then(|v| {
+                                                            v.split(|c: char| !c.is_numeric())
+                                                                .next()
+                                                        }) // Grab first numeric component
+                                                        .and_then(|s| s.parse::<i32>().ok())
+                                                        .unwrap_or(0)
+                                                })
+                                                .map(|i| i.path.clone())
+                                        })
+                                        .unwrap_or_else(|| std::path::PathBuf::from("java"));
+
+                                    println!("Selected Java path: {:?}", java_path);
+
+                                    let access_token =
+                                        secrets_result.map(|s| s.access_token).unwrap_or_default();
+
+                                    match game::prepare_and_launch(
+                                        &account,
+                                        &access_token,
+                                        java_path,
+                                        game_dir,
+                                    ) {
+                                        Ok(mut cmd) => match cmd.spawn() {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => {
+                                                Err(format!("Failed to start process: {}", e))
+                                            }
+                                        },
+                                        Err(e) => Err(e),
+                                    }
+                                },
+                                |res| Message::PlayScreen(PlayMessage::LaunchFinished(res)),
+                            )
                         } else {
-                            iced::Task::done(Message::PlayScreen(PlayMessage::LaunchFinished(Err("No active account".to_string()))))
+                            iced::Task::done(Message::PlayScreen(PlayMessage::LaunchFinished(Err(
+                                "No active account".to_string(),
+                            ))))
                         }
                     }
                     _ => self.play.update(play_message).map(Message::PlayScreen),
@@ -198,33 +271,51 @@ impl App {
             }
             Message::Startup => {
                 let config = FastmcConfig::load().unwrap_or_default();
-                let client_id = config.accounts.microsoft_client_id.clone()
+                let client_id = config
+                    .accounts
+                    .microsoft_client_id
+                    .clone()
                     .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
-                
-                iced::Task::perform(async move {
-                     if let Some(cid) = client_id {
-                         use account_manager::AccountService;
-                         let mut service = AccountService::new(cid).map_err(|e| e.to_string())?;
-                         let account = service.validate_active_account().map_err(|e| e.to_string())?;
-                         Ok(account.display_name.clone())
-                     } else {
-                         // No client ID means we can't validate Microsoft accounts, 
-                         // but we might not have one active. 
-                         // For now, just assume success or return a distinctive message.
-                         Ok("Offline/NoID".to_string())
-                     }
-                }, Message::AccountValidated)
+
+                iced::Task::perform(
+                    async move {
+                        if let Some(cid) = client_id {
+                            use account_manager::AccountService;
+                            let mut service =
+                                AccountService::new(cid).map_err(|e| e.to_string())?;
+                            let account = service
+                                .validate_active_account()
+                                .map_err(|e| e.to_string())?;
+                            Ok(account.display_name.clone())
+                        } else {
+                            // No client ID means we can't validate Microsoft accounts,
+                            // but we might not have one active.
+                            // For now, just assume success or return a distinctive message.
+                            Ok("Offline/NoID".to_string())
+                        }
+                    },
+                    Message::AccountValidated,
+                )
             }
             Message::AccountValidated(result) => {
                 match result {
-                    Ok(name) => {
-                         println!("Welcome back, {}", name);
-                         // Potentially show a toast or notification here
+                    Ok(_) => {
+                        self.stage = Stage::Main;
                     }
                     Err(e) => {
                         println!("Account validation failed: {}", e);
                         // If validation fails, force back to account setup
                         self.stage = Stage::AccountSetup;
+                        // Reload account screen to pick up the "requires_login" state change from disk
+                        // Since AccountScreen loads from disk on `new`, we can just re-init it or add a reload method.
+                        // For simplicity let's re-init.
+                        let config = FastmcConfig::load().unwrap_or_default();
+                        let client_id = config
+                            .accounts
+                            .microsoft_client_id
+                            .clone()
+                            .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
+                        self.account = AccountScreen::new(client_id);
                     }
                 }
                 iced::Task::none()

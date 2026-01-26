@@ -60,18 +60,19 @@ impl PlayScreen {
         .padding([16, 32])
         .width(Length::Fixed(200.0))
         .style(move |_theme, status| {
-             let base = Color::from_rgb(0.13, 0.77, 0.36);
-             let hover = Color::from_rgb(0.12, 0.61, 0.30);
-             let disabled = Color::from_rgb(0.30, 0.30, 0.35);
+            let base = Color::from_rgb(0.13, 0.77, 0.36);
+            let hover = Color::from_rgb(0.12, 0.61, 0.30);
+            let disabled = Color::from_rgb(0.30, 0.30, 0.35);
 
-             let bg = if self.is_launching {
-                 disabled
-             } else {
-                 match status {
-                    iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed => hover,
+            let bg = if self.is_launching {
+                disabled
+            } else {
+                match status {
+                    iced::widget::button::Status::Hovered
+                    | iced::widget::button::Status::Pressed => hover,
                     _ => base,
-                 }
-             };
+                }
+            };
 
             iced::widget::button::Style {
                 background: Some(bg.into()),
@@ -83,19 +84,22 @@ impl PlayScreen {
                 ..iced::widget::button::Style::default()
             }
         })
-        .on_press_maybe(if self.is_launching { None } else { Some(Message::Launch) });
+        .on_press_maybe(if self.is_launching {
+            None
+        } else {
+            Some(Message::Launch)
+        });
 
         let mut content = column![title, play_button]
             .spacing(40)
             .align_x(Alignment::Center);
 
         if let Some(error) = &self.error {
-            content = content.push(
-                text(format!("Error: {}", error))
-                    .style(|_| iced::widget::text::Style {
-                        color: Some(Color::from_rgb(0.96, 0.47, 0.47)),
-                    }),
-            );
+            content = content.push(text(format!("Error: {}", error)).style(|_| {
+                iced::widget::text::Style {
+                    color: Some(Color::from_rgb(0.96, 0.47, 0.47)),
+                }
+            }));
         }
 
         container(content)

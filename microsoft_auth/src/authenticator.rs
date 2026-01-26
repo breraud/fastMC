@@ -52,7 +52,6 @@ impl MicrosoftAuthenticator {
         })
     }
     pub fn poll_device_code(&self, code: &DeviceCodeInfo) -> Result<MicrosoftTokens, AuthError> {
-
         let token = self
             .client
             .exchange_device_access_token(&code.raw)
@@ -69,7 +68,6 @@ impl MicrosoftAuthenticator {
                 }
                 other => AuthError::OAuth(other.to_string()),
             })?;
-
 
         let access_token = token.access_token().secret().to_owned();
         let refresh_token = token

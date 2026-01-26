@@ -60,7 +60,10 @@ impl AccountScreen {
         !self.store.accounts.is_empty()
     }
 
-    pub fn get_microsoft_tokens(&self, account_id: &Uuid) -> Option<account_manager::MicrosoftSecrets> {
+    pub fn get_microsoft_tokens(
+        &self,
+        account_id: &Uuid,
+    ) -> Option<account_manager::MicrosoftSecrets> {
         self.store.microsoft_tokens(account_id).ok().flatten()
     }
 
@@ -297,13 +300,11 @@ impl AccountScreen {
         let microsoft_box: Element<'_, Message> = if let Some(code) = &self.device_code {
             container(
                 column![
-                    text("Waiting for your login...")
-                        .size(18)
-                        .style(move |_| {
-                            iced::widget::text::Style {
-                                color: Some(text_primary),
-                            }
-                        }),
+                    text("Waiting for your login...").size(18).style(move |_| {
+                        iced::widget::text::Style {
+                            color: Some(text_primary),
+                        }
+                    }),
                     text(format!(
                         "Use code {} at {}",
                         code.user_code, code.verification_uri
@@ -575,20 +576,15 @@ impl AccountScreen {
         ]
         .spacing(4);
 
-        let select_button = button(row![badge, details].spacing(12).align_y(Alignment::Center))
+        let select_button = if account.requires_login {
+            button(text("Re-login").style(move |_| iced::widget::text::Style {
+                color: Some(Color::WHITE),
+            }))
             .padding([12, 14])
             .width(Length::Fill)
             .style(move |_theme, status| {
-                let base = if is_active {
-                    Color::from_rgb(0.15, 0.27, 0.20)
-                } else {
-                    surface
-                };
-                let hover = if is_active {
-                    Color::from_rgb(0.16, 0.31, 0.22)
-                } else {
-                    Color::from_rgb(0.20, 0.20, 0.23)
-                };
+                let base = Color::from_rgb(0.8, 0.4, 0.0);
+                let hover = Color::from_rgb(0.9, 0.5, 0.0);
                 iced::widget::button::Style {
                     background: Some(
                         match status {
@@ -598,7 +594,7 @@ impl AccountScreen {
                         }
                         .into(),
                     ),
-                    text_color: text_primary,
+                    text_color: Color::WHITE,
                     border: iced::Border {
                         radius: 12.0.into(),
                         ..iced::Border::default()
@@ -606,7 +602,43 @@ impl AccountScreen {
                     ..iced::widget::button::Style::default()
                 }
             })
-            .on_press(Message::SelectAccount(account.id));
+            // Re-login just triggers the AddMicrosoft flow;
+            // since we handle upsert, it will update the existing account entry by UUID match.
+            .on_press(Message::AddMicrosoft)
+        } else {
+            button(row![badge, details].spacing(12).align_y(Alignment::Center))
+                .padding([12, 14])
+                .width(Length::Fill)
+                .style(move |_theme, status| {
+                    let base = if is_active {
+                        Color::from_rgb(0.15, 0.27, 0.20)
+                    } else {
+                        surface
+                    };
+                    let hover = if is_active {
+                        Color::from_rgb(0.16, 0.31, 0.22)
+                    } else {
+                        Color::from_rgb(0.20, 0.20, 0.23)
+                    };
+                    iced::widget::button::Style {
+                        background: Some(
+                            match status {
+                                iced::widget::button::Status::Hovered
+                                | iced::widget::button::Status::Pressed => hover,
+                                _ => base,
+                            }
+                            .into(),
+                        ),
+                        text_color: text_primary,
+                        border: iced::Border {
+                            radius: 12.0.into(),
+                            ..iced::Border::default()
+                        },
+                        ..iced::widget::button::Style::default()
+                    }
+                })
+                .on_press(Message::SelectAccount(account.id))
+        };
 
         let delete_button = button(text("Delete").style(move |_| iced::widget::text::Style {
             color: Some(Color::from_rgb(0.96, 0.47, 0.47)),

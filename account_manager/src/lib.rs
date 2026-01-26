@@ -52,6 +52,8 @@ pub struct Account {
     pub kind: AccountKind,
     /// Optional path to a cached 64x64 head render.
     pub skin_path: Option<String>,
+    #[serde(default)]
+    pub requires_login: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -119,8 +121,11 @@ impl AccountService {
         self.store.upsert_microsoft(&session)
     }
     pub fn refresh_account(&mut self, account_id: &Uuid) -> Result<&Account, AccountError> {
-        let secrets = load_microsoft_tokens(account_id)?
-            .ok_or_else(|| AccountError::Auth(microsoft_auth::AuthError::OAuth("no tokens found".to_string())))?;
+        let secrets = load_microsoft_tokens(account_id)?.ok_or_else(|| {
+            AccountError::Auth(microsoft_auth::AuthError::OAuth(
+                "no tokens found".to_string(),
+            ))
+        })?;
 
         let tokens = self.auth.refresh_access_token(&secrets.refresh_token)?;
         let session = self.game.minecraft_session(&tokens)?;
@@ -128,19 +133,76 @@ impl AccountService {
     }
 
     pub fn validate_active_account(&mut self) -> Result<&Account, AccountError> {
-        let active_id = self.store.active.ok_or(AccountError::ProfileUnavailable("No active account".to_string()))?;
-        
-        // Find the account kind without holding a reference to self.store for too long
+        let active_id = self.store.active.ok_or(AccountError::ProfileUnavailable(
+            "No active account".to_string(),
+        ))?;
+
         let is_microsoft = {
-            let account = self.store.accounts.iter().find(|a| a.id == active_id)
-                .ok_or(AccountError::ProfileUnavailable("Active account not found in store".to_string()))?;
+            let account = self
+                .store
+                .accounts
+                .iter()
+                .find(|a| a.id == active_id)
+                .ok_or(AccountError::ProfileUnavailable(
+                    "Active account not found in store".to_string(),
+                ))?;
             matches!(account.kind, AccountKind::Microsoft { .. })
         };
 
         if is_microsoft {
-            self.refresh_account(&active_id)
+            // Check if token is still valid before refreshing
+            let should_refresh = match load_microsoft_tokens(&active_id)? {
+                Some(secrets) => {
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    // buffer of 5 minutes (300 seconds)
+                    secrets.expires_at < now + 300
+                }
+                None => true,
+            };
+
+            if !should_refresh {
+                return Ok(self
+                    .store
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == active_id)
+                    .unwrap());
+            }
+
+            // We drop the borrow of self.store by ending the block above/before matching.
+            // Now we try to refresh.
+            match self.refresh_account(&active_id) {
+                Ok(_) => {
+                    // Refresh succeeded and updated the store internally.
+                    // We just need to return the reference now.
+                    Ok(self
+                        .store
+                        .accounts
+                        .iter()
+                        .find(|a| a.id == active_id)
+                        .unwrap())
+                }
+                Err(e) => {
+                    // Mark as requiring login
+                    if let Some(account) =
+                        self.store.accounts.iter_mut().find(|a| a.id == active_id)
+                    {
+                        account.requires_login = true;
+                    }
+                    self.store.save()?;
+                    Err(e)
+                }
+            }
         } else {
-             Ok(self.store.accounts.iter().find(|a| a.id == active_id).unwrap())
+            Ok(self
+                .store
+                .accounts
+                .iter()
+                .find(|a| a.id == active_id)
+                .unwrap())
         }
     }
 }
@@ -371,6 +433,7 @@ impl AccountStore {
                 uuid: offline_uuid.to_string(),
             },
             skin_path: None,
+            requires_login: false,
         };
         self.accounts.push(account);
         let last = self.accounts.last().unwrap().id;
@@ -400,6 +463,7 @@ impl AccountStore {
                     uuid: profile.id.clone(),
                     username: profile.name.clone(),
                 };
+                account.requires_login = false;
             }
 
             let account_id = self.accounts[idx].id;
@@ -417,6 +481,7 @@ impl AccountStore {
                 uuid: profile.id.clone(),
                 username: profile.name.clone(),
             },
+            requires_login: false,
         };
 
         self.accounts.push(account);
@@ -522,7 +587,7 @@ fn store_microsoft_tokens(
     let secrets = MicrosoftSecrets {
         access_token: String::new(), // Too large for Windows keyring; rely on refresh_token
         refresh_token: session.refresh_token.clone(),
-        expires_at: 0,
+        expires_at: session.expires_at,
     };
 
     let entry = keyring_entry(&account_id)?;
