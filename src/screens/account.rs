@@ -60,6 +60,10 @@ impl AccountScreen {
         !self.store.accounts.is_empty()
     }
 
+    pub fn clone_store(&self) -> AccountStore {
+        self.store.clone()
+    }
+
     pub fn get_microsoft_tokens(
         &self,
         account_id: &Uuid,
@@ -109,9 +113,8 @@ impl AccountScreen {
                     let client_id = client_id.clone();
                     let task = Task::perform(
                         async move {
-                            AccountService::new(client_id)
-                                .and_then(|svc| svc.start_microsoft_device_code())
-                                .map_err(|e| e.to_string())
+                            let service = AccountService::new(client_id).map_err(|e| e.to_string())?;
+                            service.start_microsoft_device_code().await.map_err(|e| e.to_string())
                         },
                         |result| Message::MicrosoftCodeReady(Box::new(result)),
                     );
@@ -164,6 +167,7 @@ impl AccountScreen {
                             AccountService::new(client_id).map_err(|e| e.to_string())?;
                         service
                             .complete_microsoft_login(&code)
+                            .await
                             .map_err(|e| e.to_string())?;
                         AccountStore::load().map_err(|e| e.to_string())
                     },

@@ -121,6 +121,7 @@ impl App {
                                     AccountService::new(cid).map_err(|e| e.to_string())?;
                                 let account = service
                                     .validate_active_account()
+                                    .await
                                     .map_err(|e| e.to_string())?;
                                 Ok(account.display_name.clone())
                             } else {
@@ -226,7 +227,8 @@ impl App {
                                         &access_token,
                                         java_path,
                                         game_dir,
-                                    ) {
+                                        "1.21",
+                                    ).await {
                                         Ok(mut cmd) => match cmd.spawn() {
                                             Ok(_) => Ok(()),
                                             Err(e) => {
@@ -260,6 +262,79 @@ impl App {
                 task.map(Message::JavaManagerScreen)
             }
             Message::InstancesScreen(instances_message) => {
+                if let InstancesMessage::LaunchInstance(instance_id) = &instances_message {
+                    let id = instance_id.clone();
+                    let active_account = self.account.clone_store();
+                    
+                    if let Some(account_id) = active_account.active {
+                        let account = active_account.accounts.iter().find(|a| a.id == account_id).cloned();
+                        if let Some(account) = account {
+                            if account.requires_login {
+                                self.stage = Stage::AccountSetup;
+                                return iced::Task::none();
+                            }
+
+                            return iced::Task::perform(
+                                async move {
+                                    // 1. Get tokens (Async)
+                                    let access_token = if let AccountKind::Microsoft { .. } = &account.kind {
+                                        active_account.microsoft_tokens(&account.id)
+                                            .ok().flatten()
+                                            .map(|s| s.access_token)
+                                            .unwrap_or_default()
+                                    } else {
+                                        String::new()
+                                    };
+
+                                    // 2. Prepare Launch (Async)
+                                    use directories::ProjectDirs;
+                                    let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                    let instance_dir = dirs.data_local_dir().join("instances").join(&id);
+                                    let game_dir = instance_dir.join(".minecraft");
+                                    let json_path = instance_dir.join("instance.json");
+                                    
+                                    // Load metadata
+                                    let content = tokio::fs::read_to_string(&json_path).await
+                                        .map_err(|e| format!("Failed to read instance config: {}", e))?;
+                                    let metadata: instance_manager::InstanceMetadata = serde_json::from_str(&content)
+                                        .map_err(|e| format!("Invalid instance config: {}", e))?;
+
+                                    // Detect Java (Blocking, but fast-ish, can wrap if needed)
+                                    let java_config = java_manager::JavaDetectionConfig::default();
+                                    let summary = tokio::task::spawn_blocking(move || {
+                                         java_manager::detect_installations(&java_config)
+                                    }).await.map_err(|e| e.to_string())?;
+                                    
+                                    let java_path = summary.installations.iter()
+                                        .find(|i| i.version.as_ref().map(|v| v.starts_with("21")).unwrap_or(false))
+                                        .map(|i| i.path.clone())
+                                        .or_else(|| summary.installations.first().map(|i| i.path.clone()))
+                                        .unwrap_or_else(|| std::path::PathBuf::from("java"));
+
+                                    match game::prepare_and_launch(
+                                        &account,
+                                        &access_token,
+                                        java_path,
+                                        game_dir,
+                                        &metadata.game_version,
+                                    ).await {
+                                        Ok(mut cmd) => match cmd.spawn() {
+                                            Ok(_) => Ok(()),
+                                            Err(e) => Err(format!("Failed to spawn process: {}", e)),
+                                        },
+                                        Err(e) => Err(e),
+                                    }
+                                },
+                                |res| Message::InstancesScreen(InstancesMessage::LaunchFinished(res)),
+                            );
+                        } else {
+                             return iced::Task::done(Message::InstancesScreen(InstancesMessage::LaunchFinished(Err("Active account not found".to_string()))));
+                        }
+                    } else {
+                         return iced::Task::done(Message::InstancesScreen(InstancesMessage::LaunchFinished(Err("No active account".to_string()))));
+                    }
+                 }
+            
                 let task = self.instances.update(instances_message);
                 task.map(Message::InstancesScreen)
             }
@@ -302,6 +377,7 @@ impl App {
                                 AccountService::new(cid).map_err(|e| e.to_string())?;
                             let account = service
                                 .validate_active_account()
+                                .await
                                 .map_err(|e| e.to_string())?;
                             Ok(account.display_name.clone())
                         } else {

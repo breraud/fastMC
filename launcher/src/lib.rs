@@ -123,6 +123,7 @@ impl VanillaLaunchConfig {
         cmd.arg("--accessToken").arg(auth.access_token());
         cmd.arg("--userType").arg(auth.user_type());
         cmd.arg("--versionType").arg("release");
+        cmd.arg("--userProperties").arg("{}");
 
         if let Some(resolution) = &self.resolution {
             cmd.arg("--width")

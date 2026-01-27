@@ -1,5 +1,5 @@
 use crate::instance_manager::{InstanceManager, InstanceMetadata};
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Alignment, Color, Element, Length, Task};
 
 #[derive(Debug, Clone)]
@@ -11,13 +11,20 @@ pub enum Message {
     InstanceCreated(Result<InstanceMetadata, String>),
     DeleteInstance(String),
     InstanceDeleted(Result<String, String>), // Returns ID on success
+    VersionsLoaded(Result<Vec<version_manager::VanillaVersion>, String>),
+    VersionSelected(Option<String>),
+    LaunchInstance(String), // Instance ID
+    LaunchFinished(Result<(), String>),
 }
 
 pub struct InstancesScreen {
     instances: Vec<InstanceMetadata>,
     manager: InstanceManager,
     create_name: String,
+    available_versions: Vec<version_manager::VanillaVersion>,
+    selected_version: Option<String>,
     status_msg: Option<String>,
+
 }
 
 impl InstancesScreen {
@@ -30,16 +37,32 @@ impl InstancesScreen {
             instances: Vec::new(),
             manager,
             create_name: String::new(),
+            available_versions: Vec::new(),
+            selected_version: None,
             status_msg: None,
         }
     }
 
+    pub fn fetch_versions(&self) -> Task<Message> {
+        Task::perform(
+            async {
+                version_manager::fetch_vanilla_versions()
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            |res| Message::VersionsLoaded(res),
+        )
+    }
+
     pub fn refresh(&self) -> Task<Message> {
         let manager = self.manager.clone();
-        Task::perform(
-            async move { manager.list_instances() },
-            Message::Loaded,
-        )
+        Task::batch(vec![
+            Task::perform(
+                async move { manager.list_instances() },
+                Message::Loaded,
+            ),
+            self.fetch_versions(),
+        ])
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -59,7 +82,7 @@ impl InstancesScreen {
                 }
                 
                 let name = self.create_name.clone();
-                let version = "1.21".to_string(); // Hardcoded for now
+                let version = self.selected_version.clone().unwrap_or_else(|| "1.21".to_string());
                 let manager = self.manager.clone();
                 
                 self.status_msg = Some("Creating instance...".to_string());
@@ -106,6 +129,39 @@ impl InstancesScreen {
                     }
                 }
             }
+            Message::LaunchInstance(_) => Task::none(), // Handled by parent
+            Message::LaunchFinished(result) => {
+                match result {
+                    Ok(_) => {
+                        self.status_msg = Some("Instance launched!".to_string());
+                    }
+                    Err(e) => {
+                        self.status_msg = Some(format!("Launch failed: {}", e));
+                    }
+                }
+                Task::none()
+            }
+            Message::VersionsLoaded(result) => {
+                 match result {
+                    Ok(versions) => {
+                        self.available_versions = versions;
+                        // Default to latest release if available
+                        if let Some(latest) = self.available_versions.iter().find(|v| v.type_ == version_manager::VersionType::Release) {
+                            if self.selected_version.is_none() {
+                                self.selected_version = Some(latest.id.clone());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.status_msg = Some(format!("Failed to fetch versions: {}", e));
+                    }
+                }
+                Task::none()
+            }
+            Message::VersionSelected(version) => {
+                self.selected_version = version;
+                Task::none()
+            }
         }
     }
 
@@ -121,13 +177,22 @@ impl InstancesScreen {
             .on_input(Message::CreateNameChanged)
             .padding(10)
             .width(Length::Fixed(300.0));
+
+        let version_list: Vec<String> = self.available_versions.iter().map(|v| v.id.clone()).collect();
+        let version_picker = pick_list(
+            std::borrow::Cow::Owned(version_list),
+            self.selected_version.clone(),
+            |v| Message::VersionSelected(Some(v)),
+        )
+        .placeholder("Select Version")
+        .width(Length::Fixed(150.0));
             
-        let create_btn = button(text("Create 1.21 Instance"))
+        let create_btn = button(text("Create"))
             .on_press(Message::CreateInstance)
             .padding(10)
             .style(iced::widget::button::primary);
 
-        let create_row = row![create_input, create_btn]
+        let create_row = row![create_input, version_picker, create_btn]
             .spacing(10)
             .align_y(Alignment::Center);
 
@@ -160,8 +225,14 @@ impl InstancesScreen {
                         .padding([5, 10])
                         .style(iced::widget::button::danger);
 
+                    let launch_btn = button(text("Launch").size(12))
+                        .on_press(Message::LaunchInstance(inst.id.clone()))
+                        .padding([5, 10])
+                        .style(iced::widget::button::success);
+
                     container(
-                        row![info, iced::widget::Space::new().width(Length::Fill), delete_btn]
+                        row![info, iced::widget::Space::new().width(Length::Fill), launch_btn, delete_btn]
+                            .spacing(10)
                             .align_y(Alignment::Center)
                     )
                     .padding(10)

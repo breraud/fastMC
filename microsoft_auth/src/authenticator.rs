@@ -2,13 +2,13 @@ use crate::errors::AuthError;
 use crate::models::{DeviceCodeInfo, DeviceResponse, MicrosoftTokens};
 use oauth2::basic::BasicClient;
 use oauth2::devicecode::DeviceCodeErrorResponseType;
-use oauth2::reqwest::http_client;
+use oauth2::reqwest::async_http_client;
 use oauth2::{
     AuthUrl, ClientId, DeviceAuthorizationUrl, RequestTokenError, Scope, TokenResponse, TokenUrl,
 };
-use std::thread;
 use std::time::{Duration, SystemTime};
 
+#[derive(Clone)]
 pub struct MicrosoftAuthenticator {
     client: BasicClient,
 }
@@ -20,7 +20,7 @@ impl MicrosoftAuthenticator {
         }
     }
 
-    pub fn start_device_code(&self) -> Result<DeviceCodeInfo, AuthError> {
+    pub async fn start_device_code(&self) -> Result<DeviceCodeInfo, AuthError> {
         let request = self
             .client
             .exchange_device_code()
@@ -30,7 +30,8 @@ impl MicrosoftAuthenticator {
             .add_scope(Scope::new("XboxLive.signin".into()))
             .add_scope(Scope::new("offline_access".into()))
             .add_scope(Scope::new("openid".into()))
-            .request(http_client)
+            .request_async(async_http_client)
+            .await
             .map_err(|err| AuthError::OAuth(format!("{:?}", err)))?;
 
         let message = format!(
@@ -51,15 +52,16 @@ impl MicrosoftAuthenticator {
             raw: response,
         })
     }
-    pub fn poll_device_code(&self, code: &DeviceCodeInfo) -> Result<MicrosoftTokens, AuthError> {
+    pub async fn poll_device_code(&self, code: &DeviceCodeInfo) -> Result<MicrosoftTokens, AuthError> {
         let token = self
             .client
             .exchange_device_access_token(&code.raw)
-            .request(
-                http_client,
-                thread::sleep,
+            .request_async(
+                async_http_client,
+                tokio::time::sleep,
                 Some(Duration::from_secs(code.expires_in)),
             )
+            .await
             .map_err(|err| match err {
                 RequestTokenError::ServerResponse(resp)
                     if resp.error() == &DeviceCodeErrorResponseType::ExpiredToken =>
@@ -84,11 +86,12 @@ impl MicrosoftAuthenticator {
             expires_at: unix_timestamp_after(expires_in),
         })
     }
-    pub fn refresh_access_token(&self, refresh_token: &str) -> Result<MicrosoftTokens, AuthError> {
+    pub async fn refresh_access_token(&self, refresh_token: &str) -> Result<MicrosoftTokens, AuthError> {
         let token = self
             .client
             .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.to_string()))
-            .request(http_client)
+            .request_async(async_http_client)
+            .await
             .map_err(|err| AuthError::OAuth(err.to_string()))?;
 
         let access_token = token.access_token().secret().to_owned();

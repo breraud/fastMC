@@ -1,7 +1,7 @@
 use directories::ProjectDirs;
 use keyring::{Entry, Error as KeyringError};
 use microsoft_auth::{DeviceCodeInfo, MicrosoftAuthenticator, MicrosoftTokens};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -62,6 +62,7 @@ pub struct AccountStore {
     pub accounts: Vec<Account>,
 }
 
+#[derive(Clone)]
 pub struct AccountService {
     store: AccountStore,
     auth: MicrosoftAuthenticator,
@@ -108,31 +109,32 @@ impl AccountService {
         self.store.add_offline(username)
     }
 
-    pub fn start_microsoft_device_code(&self) -> Result<DeviceCodeInfo, AccountError> {
-        Ok(self.auth.start_device_code()?)
+    pub async fn start_microsoft_device_code(&self) -> Result<DeviceCodeInfo, AccountError> {
+        Ok(self.auth.start_device_code().await?)
     }
 
-    pub fn complete_microsoft_login(
+    pub async fn complete_microsoft_login(
         &mut self,
         code: &DeviceCodeInfo,
     ) -> Result<&Account, AccountError> {
-        let tokens: MicrosoftTokens = self.auth.poll_device_code(code)?;
-        let session = self.game.minecraft_session(&tokens)?;
-        self.store.upsert_microsoft(&session)
+        let tokens: MicrosoftTokens = self.auth.poll_device_code(code).await?;
+        let session = self.game.minecraft_session(&tokens).await?;
+        self.store.upsert_microsoft(&session).await
     }
-    pub fn refresh_account(&mut self, account_id: &Uuid) -> Result<&Account, AccountError> {
+    
+    pub async fn refresh_account(&mut self, account_id: &Uuid) -> Result<&Account, AccountError> {
         let secrets = load_microsoft_tokens(account_id)?.ok_or_else(|| {
             AccountError::Auth(microsoft_auth::AuthError::OAuth(
                 "no tokens found".to_string(),
             ))
         })?;
 
-        let tokens = self.auth.refresh_access_token(&secrets.refresh_token)?;
-        let session = self.game.minecraft_session(&tokens)?;
-        self.store.upsert_microsoft(&session)
+        let tokens = self.auth.refresh_access_token(&secrets.refresh_token).await?;
+        let session = self.game.minecraft_session(&tokens).await?;
+        self.store.upsert_microsoft(&session).await
     }
 
-    pub fn validate_active_account(&mut self) -> Result<&Account, AccountError> {
+    pub async fn validate_active_account(&mut self) -> Result<&Account, AccountError> {
         let active_id = self.store.active.ok_or(AccountError::ProfileUnavailable(
             "No active account".to_string(),
         ))?;
@@ -158,7 +160,6 @@ impl AccountService {
                         .unwrap_or_default()
                         .as_secs();
                     // buffer of 5 minutes (300 seconds)
-                    // Also force refresh if the stored access token is empty (as expected with our storage logic)
                     secrets.expires_at < now + 300 || secrets.access_token.is_empty()
                 }
                 None => true,
@@ -173,13 +174,10 @@ impl AccountService {
                     .unwrap());
             }
 
-            // We drop the borrow of self.store by ending the block above/before matching.
-            // Now we try to refresh.
-            match self.refresh_account(&active_id) {
+            // We update the store via refresh_account, then re-fetch reference
+            match self.refresh_account(&active_id).await {
                 Ok(_) => {
-                    // Refresh succeeded and updated the store internally.
-                    // We just need to return the reference now.
-                    Ok(self
+                     Ok(self
                         .store
                         .accounts
                         .iter()
@@ -223,6 +221,7 @@ pub struct MinecraftSession {
     pub profile: MinecraftProfile,
 }
 
+#[derive(Clone)]
 pub struct MicrosoftGameClient {
     http: Client,
 }
@@ -233,14 +232,14 @@ impl MicrosoftGameClient {
         Ok(Self { http })
     }
 
-    pub fn minecraft_session(
+    pub async fn minecraft_session(
         &self,
         microsoft: &MicrosoftTokens,
     ) -> Result<MinecraftSession, AccountError> {
-        let (xbl_token, user_hash) = self.xbox_live_token(&microsoft.access_token)?;
-        let (xsts_token, user_hash) = self.xsts_token(&xbl_token, &user_hash)?;
-        let (minecraft_token, expires_in) = self.minecraft_login(&user_hash, &xsts_token)?;
-        let profile = self.minecraft_profile(&minecraft_token)?;
+        let (xbl_token, user_hash) = self.xbox_live_token(&microsoft.access_token).await?;
+        let (xsts_token, user_hash) = self.xsts_token(&xbl_token, &user_hash).await?;
+        let (minecraft_token, expires_in) = self.minecraft_login(&user_hash, &xsts_token).await?;
+        let profile = self.minecraft_profile(&minecraft_token).await?;
 
         Ok(MinecraftSession {
             access_token: minecraft_token,
@@ -250,7 +249,7 @@ impl MicrosoftGameClient {
         })
     }
 
-    fn xbox_live_token(&self, access_token: &str) -> Result<(String, String), AccountError> {
+    async fn xbox_live_token(&self, access_token: &str) -> Result<(String, String), AccountError> {
         let payload = serde_json::json!({
             "Properties": {
                 "AuthMethod": "RPS",
@@ -265,9 +264,11 @@ impl MicrosoftGameClient {
             .http
             .post("https://user.auth.xboxlive.com/user/authenticate")
             .json(&payload)
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .json()?;
+            .json()
+            .await?;
 
         let uhs = response
             .display_claims
@@ -279,7 +280,7 @@ impl MicrosoftGameClient {
         Ok((response.token, uhs))
     }
 
-    fn xsts_token(&self, xbl_token: &str, uhs: &str) -> Result<(String, String), AccountError> {
+    async fn xsts_token(&self, xbl_token: &str, uhs: &str) -> Result<(String, String), AccountError> {
         let payload = serde_json::json!({
             "Properties": {
                 "SandboxId": "RETAIL",
@@ -293,9 +294,11 @@ impl MicrosoftGameClient {
             .http
             .post("https://xsts.auth.xboxlive.com/xsts/authorize")
             .json(&payload)
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .json()?;
+            .json()
+            .await?;
 
         let user_hash = response
             .display_claims
@@ -307,7 +310,7 @@ impl MicrosoftGameClient {
         Ok((response.token, user_hash))
     }
 
-    fn minecraft_login(&self, uhs: &str, xsts_token: &str) -> Result<(String, u64), AccountError> {
+    async fn minecraft_login(&self, uhs: &str, xsts_token: &str) -> Result<(String, u64), AccountError> {
         let payload = serde_json::json!({
             "identityToken": format!("XBL3.0 x={};{}", uhs, xsts_token)
         });
@@ -316,19 +319,22 @@ impl MicrosoftGameClient {
             .http
             .post("https://api.minecraftservices.com/authentication/login_with_xbox")
             .json(&payload)
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .json()?;
+            .json()
+            .await?;
 
         Ok((response.access_token, response.expires_in))
     }
 
-    fn minecraft_profile(&self, minecraft_token: &str) -> Result<MinecraftProfile, AccountError> {
+    async fn minecraft_profile(&self, minecraft_token: &str) -> Result<MinecraftProfile, AccountError> {
         let response = self
             .http
             .get("https://api.minecraftservices.com/minecraft/profile")
             .bearer_auth(minecraft_token)
-            .send()?;
+            .send()
+            .await?;
 
         if response.status().as_u16() == 404 {
             return Err(AccountError::ProfileUnavailable(
@@ -336,7 +342,7 @@ impl MicrosoftGameClient {
             ));
         }
 
-        let profile: MinecraftProfileResponse = response.error_for_status()?.json()?;
+        let profile: MinecraftProfileResponse = response.error_for_status()?.json().await?;
         let skin_url = profile
             .skins
             .and_then(|skins| skins.into_iter().find(|s| s.state == "ACTIVE"))
@@ -443,12 +449,12 @@ impl AccountStore {
         Ok(self.accounts.last().unwrap())
     }
 
-    pub fn upsert_microsoft(
+    pub async fn upsert_microsoft(
         &mut self,
         session: &MinecraftSession,
     ) -> Result<&Account, AccountError> {
         let profile = &session.profile;
-        let skin_path = cache_skin_head(&profile.id)?;
+        let skin_path = cache_skin_head(&profile.id).await?;
 
         if let Some(idx) = self.accounts.iter().position(|acc| {
             matches!(
@@ -521,9 +527,11 @@ impl AccountStore {
     }
 }
 
-fn cache_skin_head(uuid: &str) -> Result<Option<String>, AccountError> {
+async fn cache_skin_head(uuid: &str) -> Result<Option<String>, AccountError> {
     let cache_dir = skin_cache_dir()?;
-    fs::create_dir_all(&cache_dir)?;
+    if !cache_dir.exists() {
+        fs::create_dir_all(&cache_dir)?;
+    }
 
     let url = format!(
         "https://crafatar.com/avatars/{}?size=64&overlay",
@@ -531,12 +539,12 @@ fn cache_skin_head(uuid: &str) -> Result<Option<String>, AccountError> {
     );
 
     let client = Client::builder().timeout(Duration::from_secs(15)).build()?;
-    let response = client.get(url).send()?;
+    let response = client.get(url).send().await?;
     if !response.status().is_success() {
         return Ok(None);
     }
 
-    let bytes = response.bytes()?;
+    let bytes = response.bytes().await?;
     let dest = cache_dir.join(format!("{}.png", uuid));
     fs::write(&dest, bytes)?;
     Ok(Some(dest.to_string_lossy().to_string()))

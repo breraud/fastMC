@@ -1,10 +1,10 @@
 use account_manager::Account;
 use launcher::{LaunchAuth, MemorySettings, Resolution, VanillaLaunchConfig};
 use serde::Deserialize;
-use std::fs;
-use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 #[allow(dead_code)]
 pub enum LaunchProgress {
@@ -60,104 +60,54 @@ struct DownloadFile {
 #[derive(Debug, Deserialize)]
 struct Library {
     downloads: LibraryDownloads,
+    #[allow(dead_code)]
     name: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct LibraryDownloads {
     artifact: Option<DownloadFile>,
-    classifiers: Option<serde_json::Value>, // Simplified for now
+    classifiers: Option<serde_json::Value>, 
 }
 
-pub fn prepare_and_launch(
+pub async fn prepare_and_launch(
     account: &Account,
     access_token: &str,
     java_path: PathBuf,
     game_dir: PathBuf,
+    version_id: &str,
 ) -> Result<Command, String> {
     // 1. Setup directories
     let versions_dir = game_dir.join("versions");
     let libraries_dir = game_dir.join("libraries");
     let assets_dir = game_dir.join("assets");
-    let natives_dir = game_dir.join("natives").join("1.21");
+    let natives_dir = game_dir.join("natives").join(version_id);
 
-    fs::create_dir_all(&versions_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&libraries_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&natives_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&versions_dir).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(&libraries_dir).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(&assets_dir).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(&natives_dir).await.map_err(|e| e.to_string())?;
 
     // 2. Fetch Manifest
-    let version_id = "1.21";
     let version_json_path = versions_dir
         .join(version_id)
         .join(format!("{}.json", version_id));
 
     println!("Checking version manifest at {:?}", version_json_path);
 
-    let version_data: VersionData = {
-        // Helper to fetch and save
-        let fetch_manifest = || -> Result<VersionData, String> {
-            // Step 1: Fetch the main version manifest to get the dynamic URL for 1.21
-            let manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
-            println!("Fetching main manifest from {}", manifest_url);
-            let client = reqwest::blocking::Client::new();
-            let resp = client.get(manifest_url).send().map_err(|e| e.to_string())?;
-            if !resp.status().is_success() {
-                return Err(format!(
-                    "Failed to fetch main manifest: Status {}",
-                    resp.status()
-                ));
+    // We can't use a closure easily with async recursion/await inside without BoxFuture.
+    // So we'll just inline the logic or use a loop.
+    let version_data: VersionData = if version_json_path.exists() {
+         let content = fs::read_to_string(&version_json_path).await.map_err(|e| e.to_string())?;
+         match serde_json::from_str::<VersionData>(&content) {
+            Ok(data) => data,
+            Err(_) => {
+                println!("Local manifest corrupted. Re-downloading...");
+                fetch_manifest(version_id, &versions_dir, &version_json_path).await?
             }
-            let manifest_json: serde_json::Value = resp
-                .json()
-                .map_err(|e| format!("Failed to parse main manifest: {}", e))?;
-
-            let version_url = manifest_json["versions"]
-                .as_array()
-                .ok_or("Invalid manifest format")?
-                .iter()
-                .find(|v| v["id"] == "1.21")
-                .and_then(|v| v["url"].as_str())
-                .ok_or("Version 1.21 not found in manifest")?
-                .to_string();
-
-            println!("Found 1.21 URL: {}", version_url);
-
-            // Step 2: Fetch the actual version json
-            let resp = client.get(&version_url).send().map_err(|e| e.to_string())?;
-            if !resp.status().is_success() {
-                return Err(format!(
-                    "Failed to fetch 1.21 manifest: Status {}",
-                    resp.status()
-                ));
-            }
-            let content = resp.text().map_err(|e| e.to_string())?;
-
-            fs::create_dir_all(versions_dir.join(version_id)).map_err(|e| e.to_string())?;
-            fs::write(&version_json_path, &content).map_err(|e| e.to_string())?;
-
-            serde_json::from_str(&content)
-                .map_err(|e| format!("Failed to parse downloaded manifest: {}", e))
-        };
-
-        if version_json_path.exists() {
-            match fs::read_to_string(&version_json_path) {
-                Ok(content) => match serde_json::from_str::<VersionData>(&content) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        println!(
-                            "Local manifest corrupted ({}). Deleting and re-downloading...",
-                            e
-                        );
-                        fs::remove_file(&version_json_path).ok();
-                        fetch_manifest()?
-                    }
-                },
-                Err(_) => fetch_manifest()?,
-            }
-        } else {
-            fetch_manifest()?
-        }
+         }
+    } else {
+        fetch_manifest(version_id, &versions_dir, &version_json_path).await?
     };
 
     // 3. Download Client JAR
@@ -165,7 +115,7 @@ pub fn prepare_and_launch(
         .join(version_id)
         .join(format!("{}.jar", version_id));
     if !client_jar.exists() {
-        download_file(&version_data.downloads.client.url, &client_jar)?;
+        download_file(&version_data.downloads.client.url, &client_jar).await?;
     }
 
     // 4. Download Libraries (Including Natives)
@@ -183,16 +133,15 @@ pub fn prepare_and_launch(
 
             if !lib_path.exists() {
                 if let Some(parent) = lib_path.parent() {
-                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                 }
-                download_file(&artifact.url, &lib_path)?;
+                download_file(&artifact.url, &lib_path).await?;
             }
             classpath.push(lib_path);
         }
 
         // Natives
         if let Some(classifiers) = lib.downloads.classifiers {
-            // Determine the current OS classifier
             let os_classifier = if cfg!(target_os = "windows") {
                 "natives-windows"
             } else if cfg!(target_os = "macos") {
@@ -204,36 +153,35 @@ pub fn prepare_and_launch(
             };
 
             if let Some(native_obj) = classifiers.get(os_classifier) {
-                // Deserialize manually or assume structure
                 if let Ok(file_info) = serde_json::from_value::<DownloadFile>(native_obj.clone()) {
-                    // Download native jar
-                    let nat_path =
-                        libraries_dir.join(format!("{}-{}.jar", lib.name.replace(':', "-"), os_classifier));
+                    let nat_path = libraries_dir.join(format!("{}-{}.jar", lib.name.replace(':', "-"), os_classifier));
                     
                     if !nat_path.exists() {
-                        download_file(&file_info.url, &nat_path)?;
+                        download_file(&file_info.url, &nat_path).await?;
                     }
 
-                    // Extract (basic unzip)
-                    // In a real implementation we should filter META-INF
-                    if let Ok(file) = fs::File::open(&nat_path) {
-                        let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-                        for i in 0..archive.len() {
-                            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-                            let outpath = natives_dir.join(file.name());
-
-                            if file.name().contains("META-INF") {
-                                continue;
+                    // Extract (Synchronous - handled in blocking task)
+                    let nat_path_clone = nat_path.clone();
+                    let natives_dir_clone = natives_dir.clone();
+                    
+                    tokio::task::spawn_blocking(move || {
+                        if let Ok(file) = std::fs::File::open(&nat_path_clone) {
+                            if let Ok(mut archive) = zip::ZipArchive::new(file) {
+                                for i in 0..archive.len() {
+                                    if let Ok(mut file) = archive.by_index(i) {
+                                        if file.name().contains("META-INF") { continue; }
+                                        let outpath = natives_dir_clone.join(file.name());
+                                        if let Some(p) = outpath.parent() {
+                                            std::fs::create_dir_all(p).ok();
+                                        }
+                                        if let Ok(mut outfile) = std::fs::File::create(&outpath) {
+                                            std::io::copy(&mut file, &mut outfile).ok();
+                                        }
+                                    }
+                                }
                             }
-
-                            if let Some(p) = outpath.parent() {
-                                fs::create_dir_all(p).map_err(|e| e.to_string())?;
-                            }
-                            let mut outfile =
-                                fs::File::create(&outpath).map_err(|e| e.to_string())?;
-                            io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
                         }
-                    }
+                    }).await.map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -245,18 +193,21 @@ pub fn prepare_and_launch(
         .join("indexes")
         .join(format!("{}.json", version_data.asset_index.id));
     if !asset_index_path.exists() {
-        fs::create_dir_all(asset_index_path.parent().unwrap()).map_err(|e| e.to_string())?;
-        download_file(&version_data.asset_index.url, &asset_index_path)?;
+        if let Some(parent) = asset_index_path.parent() {
+            fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        }
+        download_file(&version_data.asset_index.url, &asset_index_path).await?;
     }
 
-    // Process Asset Index to download actual objects
     println!("Verifying assets from index: {:?}", asset_index_path);
-    let index_content = fs::read_to_string(&asset_index_path).map_err(|e| e.to_string())?;
+    let index_content = fs::read_to_string(&asset_index_path).await.map_err(|e| e.to_string())?;
     let index_data: serde_json::Value =
         serde_json::from_str(&index_content).map_err(|e| e.to_string())?;
 
     if let Some(objects) = index_data["objects"].as_object() {
         let objects_dir = assets_dir.join("objects");
+        // For performance, we should parallelize this. But strict sequential for now to avoid complexity.
+        // Or simple concurrency.
         for (_name, obj) in objects {
             if let Some(hash) = obj["hash"].as_str()
                 && hash.len() >= 2
@@ -265,18 +216,11 @@ pub fn prepare_and_launch(
                 let object_path = objects_dir.join(prefix).join(hash);
 
                 if !object_path.exists() {
-                    let url = format!(
-                        "https://resources.download.minecraft.net/{}/{}",
-                        prefix, hash
-                    );
+                    let url = format!("https://resources.download.minecraft.net/{}/{}", prefix, hash);
                     if let Some(parent) = object_path.parent() {
-                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                        fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
                     }
-                    // Use a lighter download function or silent one to avoid spamming console for 1000s of assets
-                    // For now we assume standard download_file but maybe suppress log if too spammy
-                    // Let's just download it.
-                    // println!("Downloading asset {}", hash);
-                    match download_file(&url, &object_path) {
+                     match download_file(&url, &object_path).await {
                         Ok(_) => {}
                         Err(e) => println!("Failed to download asset {}: {}", hash, e),
                     }
@@ -323,23 +267,53 @@ pub fn prepare_and_launch(
     Ok(config.build_command(&auth))
 }
 
-fn download_file(url: &str, path: &Path) -> Result<(), String> {
-    println!("Downloading {} to {:?}", url, path);
-    let mut response =
-        reqwest::blocking::get(url).map_err(|e| format!("Failed to GET {}: {}", url, e))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Download failed for {}: Status {}",
-            url,
-            response.status()
-        ));
+async fn fetch_manifest(version_id: &str, versions_dir: &Path, json_path: &Path) -> Result<VersionData, String> {
+    let manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+    println!("Fetching main manifest from {}", manifest_url);
+    
+    // Async client
+    let client = reqwest::Client::new();
+    let resp = client.get(manifest_url).send().await.map_err(|e| e.to_string())?;
+    
+    if !resp.status().is_success() {
+        return Err(format!("Failed to fetch manifest: {}", resp.status()));
     }
+    
+    let manifest_json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    
+    let version_url = manifest_json["versions"]
+        .as_array()
+        .ok_or("Invalid manifest format")?
+        .iter()
+        .find(|v| v["id"] == version_id)
+        .and_then(|v| v["url"].as_str())
+        .ok_or(format!("Version {} not found", version_id))?
+        .to_string();
 
-    let mut file =
-        fs::File::create(path).map_err(|e| format!("Failed to create file {:?}: {}", path, e))?;
-    io::copy(&mut response, &mut file)
-        .map_err(|e| format!("Failed to write to {:?}: {}", path, e))?;
+    println!("Found {} URL: {}", version_id, version_url);
+
+    let resp = client.get(&version_url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+         return Err(format!("Failed to fetch version json: {}", resp.status()));
+    }
+    let content = resp.text().await.map_err(|e| e.to_string())?;
+
+    fs::create_dir_all(versions_dir.join(version_id)).await.map_err(|e| e.to_string())?;
+    fs::write(json_path, &content).await.map_err(|e| e.to_string())?;
+
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+async fn download_file(url: &str, path: &Path) -> Result<(), String> {
+    println!("Downloading {} to {:?}", url, path);
+    // Use reqwest async
+    let resp = reqwest::get(url).await.map_err(|e| format!("Failed to GET {}: {}", url, e))?;
+    if !resp.status().is_success() {
+        return Err(format!("Download failed: {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    
+    fs::write(path, bytes).await.map_err(|e| format!("Write failed: {}", e))?;
     Ok(())
 }
 

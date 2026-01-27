@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum VersionType {
     #[serde(rename = "release")]
     Release,
@@ -18,7 +18,7 @@ pub enum VersionType {
 pub struct VanillaVersion {
     pub id: String,
     #[serde(rename = "type")]
-    pub type_: String, // "release", "snapshot", etc. - keeping as string for broader compatibility or strictly enum if we custom deserialize
+    pub type_: VersionType, // "release", "snapshot", etc. - keeping as string for broader compatibility or strictly enum if we custom deserialize
     pub url: String,
     pub time: String,
     #[serde(rename = "releaseTime")]
