@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["account_manager","config_manager", "launcher","microsoft_auth","java_manager"]
+members = ["account_manager","config_manager", "launcher","microsoft_auth","java_manager", "version_manager"]
 
 [package]
 name = "fastmc"
@@ -14,6 +14,7 @@ config_manager = {path = "./config_manager"}
 account_manager = {path = "./account_manager"}
 java_manager = {path = "./java_manager"}
 launcher = {path = "./launcher"}
+version_manager = {path = "./version_manager"}
 rfd = "0.14"
 directories = "5.0"
 reqwest = {version = "0.11.24", features = ["json", "blocking"]}
