@@ -1,5 +1,5 @@
 use crate::instance_manager::{InstanceManager, InstanceMetadata};
-use iced::widget::{button, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
 use iced::{Alignment, Color, Element, Length, Task};
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,7 @@ pub enum Message {
     InstanceDeleted(Result<String, String>), // Returns ID on success
     VersionsLoaded(Result<Vec<version_manager::VanillaVersion>, String>),
     VersionSelected(Option<String>),
+    ToggleSnapshots(bool),
     LaunchInstance(String), // Instance ID
     LaunchFinished(Result<(), String>),
 }
@@ -23,6 +24,7 @@ pub struct InstancesScreen {
     create_name: String,
     available_versions: Vec<version_manager::VanillaVersion>,
     selected_version: Option<String>,
+    show_snapshots: bool,
     status_msg: Option<String>,
 
 }
@@ -39,6 +41,7 @@ impl InstancesScreen {
             create_name: String::new(),
             available_versions: Vec::new(),
             selected_version: None,
+            show_snapshots: false,
             status_msg: None,
         }
     }
@@ -162,6 +165,12 @@ impl InstancesScreen {
                 self.selected_version = version;
                 Task::none()
             }
+            Message::ToggleSnapshots(show) => {
+                self.show_snapshots = show;
+                // If currently selected version is hidden by filter, might want to deselect or keep it.
+                // For now, we'll just keep it (it won't be in the list but state remains).
+                Task::none()
+            }
         }
     }
 
@@ -178,7 +187,11 @@ impl InstancesScreen {
             .padding(10)
             .width(Length::Fixed(300.0));
 
-        let version_list: Vec<String> = self.available_versions.iter().map(|v| v.id.clone()).collect();
+        let version_list: Vec<String> = self.available_versions.iter()
+            .filter(|v| self.show_snapshots || v.type_ == version_manager::VersionType::Release)
+            .map(|v| v.id.clone())
+            .collect();
+            
         let version_picker = pick_list(
             std::borrow::Cow::Owned(version_list),
             self.selected_version.clone(),
@@ -192,7 +205,14 @@ impl InstancesScreen {
             .padding(10)
             .style(iced::widget::button::primary);
 
-        let create_row = row![create_input, version_picker, create_btn]
+        let snapshot_toggle = row![
+            checkbox(self.show_snapshots).on_toggle(Message::ToggleSnapshots).size(16),
+            text("Show Snapshots").size(14).color(Color::WHITE)
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let create_row = row![create_input, version_picker, snapshot_toggle, create_btn]
             .spacing(10)
             .align_y(Alignment::Center);
 

@@ -181,41 +181,10 @@ impl App {
                                         );
                                     }
 
-                                    let java_path = summary
-                                        .installations
-                                        .iter()
-                                        .find(|i| {
-                                            i.version
-                                                .as_ref()
-                                                .map(|v| {
-                                                    v.starts_with("21")
-                                                        || v.starts_with("22")
-                                                        || v.starts_with("23")
-                                                })
-                                                .unwrap_or(false)
-                                        })
-                                        .map(|i| i.path.clone())
-                                        .or_else(|| {
-                                            // Fallback to searching for *any* Java if 21 isn't explicitly found,
-                                            // essentially trusting the user's PATH or JAVA_HOME might be newer than what capture suggests,
-                                            // or picking the "best" available.
-                                            // For now, let's look for the highest version we can parse.
-                                            summary
-                                                .installations
-                                                .iter()
-                                                .max_by_key(|i| {
-                                                    i.version
-                                                        .as_ref()
-                                                        .and_then(|v| {
-                                                            v.split(|c: char| !c.is_numeric())
-                                                                .next()
-                                                        }) // Grab first numeric component
-                                                        .and_then(|s| s.parse::<i32>().ok())
-                                                        .unwrap_or(0)
-                                                })
-                                                .map(|i| i.path.clone())
-                                        })
-                                        .unwrap_or_else(|| std::path::PathBuf::from("java"));
+                                    // Select Java based on version
+                                    let target_version = "1.0"; // Hardcoded for testing legacy launch
+                                    
+                                    let java_path = summary.select_for_version(target_version).map_err(|e| e.to_string())?;
 
                                     println!("Selected Java path: {:?}", java_path);
 
@@ -227,7 +196,7 @@ impl App {
                                         &access_token,
                                         java_path,
                                         game_dir,
-                                        "1.21",
+                                        target_version,
                                     ).await {
                                         Ok(mut cmd) => match cmd.spawn() {
                                             Ok(_) => Ok(()),
@@ -300,16 +269,17 @@ impl App {
                                         .map_err(|e| format!("Invalid instance config: {}", e))?;
 
                                     // Detect Java (Blocking, but fast-ish, can wrap if needed)
-                                    let java_config = java_manager::JavaDetectionConfig::default();
+                                    let config = FastmcConfig::load().unwrap_or_default();
+                                    
+                                    // Use settings to drive detection (respects user preference)
+                                    let java_settings = java_manager::JavaLaunchSettings::from(&config.java);
+                                    let java_config = java_settings.detection_config();
+                                    
                                     let summary = tokio::task::spawn_blocking(move || {
                                          java_manager::detect_installations(&java_config)
                                     }).await.map_err(|e| e.to_string())?;
-                                    
-                                    let java_path = summary.installations.iter()
-                                        .find(|i| i.version.as_ref().map(|v| v.starts_with("21")).unwrap_or(false))
-                                        .map(|i| i.path.clone())
-                                        .or_else(|| summary.installations.first().map(|i| i.path.clone()))
-                                        .unwrap_or_else(|| std::path::PathBuf::from("java"));
+
+                                    let java_path = summary.select_for_version(&metadata.game_version)?;
 
                                     match game::prepare_and_launch(
                                         &account,
