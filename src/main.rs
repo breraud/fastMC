@@ -143,69 +143,81 @@ impl App {
                 match play_message {
                     PlayMessage::LaunchStarted => {
                         let active_account = self.account.active_account().cloned();
+                        
+                        // We need the active instance ID from the play screen
+                        let instance_id = if let Some(meta) = self.play.active_instance() {
+                             meta.id.clone()
+                        } else {
+                             return iced::Task::done(Message::PlayScreen(PlayMessage::LaunchFinished(Err("No instance selected".to_string()))));
+                        };
+
                         if let Some(account) = active_account {
                             if account.requires_login {
-                                // Prevent launch if login required
-                                // Ideally we would switch to AccountSetup stage here too
                                 self.stage = Stage::AccountSetup;
                                 return iced::Task::none();
                             }
 
-                            // Prepare secrets
-                            let secrets_result =
-                                if let AccountKind::Microsoft { .. } = &account.kind {
-                                    self.account.get_microsoft_tokens(&account.id)
-                                } else {
-                                    None
-                                };
+                             // Reuse the launch logic from InstancesScreen essentially
+                             let active_account_store = self.account.clone_store();
 
-                            iced::Task::perform(
+                             iced::Task::perform(
                                 async move {
+                                    // 1. Get tokens
+                                    let access_token = if let AccountKind::Microsoft { .. } = &account.kind {
+                                        active_account_store.microsoft_tokens(&account.id)
+                                            .ok().flatten()
+                                            .map(|s| s.access_token)
+                                            .unwrap_or_default()
+                                    } else {
+                                        String::new()
+                                    };
+
+                                    // 2. Prepare Launch
                                     use directories::ProjectDirs;
-                                    let dirs =
-                                        ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
-                                    let game_dir = dirs.data_dir().join("minecraft");
+                                    let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                    let instance_dir = dirs.data_local_dir().join("instances").join(&instance_id);
+                                    let game_dir = instance_dir.join(".minecraft");
+                                    let json_path = instance_dir.join("instance.json");
+                                    
+                                    // Load metadata
+                                    let content = tokio::fs::read_to_string(&json_path).await
+                                        .map_err(|e| format!("Failed to read instance config: {}", e))?;
+                                    let metadata: instance_manager::InstanceMetadata = serde_json::from_str(&content)
+                                        .map_err(|e| format!("Invalid instance config: {}", e))?;
 
                                     // Detect Java
-                                    let java_config = java_manager::JavaDetectionConfig::default();
-                                    let summary = java_manager::detect_installations(&java_config);
-
-                                    println!(
-                                        "Found {} Java installations:",
-                                        summary.installations.len()
-                                    );
-                                    for install in &summary.installations {
-                                        println!(
-                                            "- Path: {:?}, Version: {:?}",
-                                            install.path, install.version
-                                        );
-                                    }
-
+                                    let config = FastmcConfig::load().unwrap_or_default();
+                                    let java_settings = java_manager::JavaLaunchSettings::from(&config.java);
+                                    let java_config = java_settings.detection_config();
                                     // Select Java based on version
                                     let target_version = "1.0"; // Hardcoded for testing legacy launch
                                     
+                                    let summary = tokio::task::spawn_blocking(move || {
+                                         java_manager::detect_installations(&java_config)
+                                    }).await.map_err(|e| e.to_string())?;
+
                                     let java_path = summary.select_for_version(target_version).map_err(|e| e.to_string())?;
 
                                     println!("Selected Java path: {:?}", java_path);
 
-                                    let access_token =
-                                        secrets_result.map(|s| s.access_token).unwrap_or_default();
+                                    let target_version = &metadata.game_version;
 
-                                    match game::prepare_and_launch(
+                                    let mut cmd = game::prepare_and_launch(
                                         &account,
                                         &access_token,
                                         java_path,
                                         game_dir,
                                         target_version,
-                                    ).await {
-                                        Ok(mut cmd) => match cmd.spawn() {
-                                            Ok(_) => Ok(()),
-                                            Err(e) => {
-                                                Err(format!("Failed to start process: {}", e))
-                                            }
-                                        },
-                                        Err(e) => Err(e),
-                                    }
+                                    ).await?;
+                                    
+                                    let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {}", e))?;
+                                    
+                                    // Wait for process to exit (blocking)
+                                    tokio::task::spawn_blocking(move || {
+                                        let _ = child.wait();
+                                    }).await.map_err(|e| e.to_string())?;
+
+                                    Ok(())
                                 },
                                 |res| Message::PlayScreen(PlayMessage::LaunchFinished(res)),
                             )
@@ -281,19 +293,22 @@ impl App {
 
                                     let java_path = summary.select_for_version(&metadata.game_version)?;
 
-                                    match game::prepare_and_launch(
+                                    let mut cmd = game::prepare_and_launch(
                                         &account,
                                         &access_token,
                                         java_path,
                                         game_dir,
                                         &metadata.game_version,
-                                    ).await {
-                                        Ok(mut cmd) => match cmd.spawn() {
-                                            Ok(_) => Ok(()),
-                                            Err(e) => Err(format!("Failed to spawn process: {}", e)),
-                                        },
-                                        Err(e) => Err(e),
-                                    }
+                                    ).await?;
+
+                                    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn process: {}", e))?;
+
+                                    // Wait for process to exit
+                                    tokio::task::spawn_blocking(move || {
+                                        let _ = child.wait();
+                                    }).await.map_err(|e| e.to_string())?;
+
+                                    Ok(())
                                 },
                                 |res| Message::InstancesScreen(InstancesMessage::LaunchFinished(res)),
                             );
@@ -339,7 +354,10 @@ impl App {
                     .clone()
                     .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
 
-                iced::Task::perform(
+                // Initial Refresh for Play Screen (Instances)
+                let refresh_task = self.play.refresh().map(Message::PlayScreen);
+
+                let validation_task = iced::Task::perform(
                     async move {
                         if let Some(cid) = client_id {
                             use account_manager::AccountService;
@@ -358,7 +376,9 @@ impl App {
                         }
                     },
                     Message::AccountValidated,
-                )
+                );
+
+                iced::Task::batch(vec![refresh_task, validation_task])
             }
             Message::AccountValidated(result) => {
                 match result {
