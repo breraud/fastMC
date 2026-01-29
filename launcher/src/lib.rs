@@ -121,6 +121,12 @@ impl VanillaLaunchConfig {
 
         cmd.arg("--uuid").arg(auth.uuid());
         cmd.arg("--accessToken").arg(auth.access_token());
+        
+        // Legacy support (1.6.4 and older)
+        // Format often expected: token:<access_token>:<uuid>
+        // Or just the token. Let's try Generic legacy format.
+        let session_str = format!("token:{}:{}", auth.access_token(), auth.uuid());
+        cmd.arg("--session").arg(session_str);
         cmd.arg("--userType").arg(auth.user_type());
         cmd.arg("--versionType").arg("release");
         cmd.arg("--userProperties").arg("{}");

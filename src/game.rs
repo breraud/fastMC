@@ -204,11 +204,31 @@ pub async fn prepare_and_launch(
     let index_data: serde_json::Value =
         serde_json::from_str(&index_content).map_err(|e| e.to_string())?;
 
+    let mut map_to_resources = false;
+    let mut is_virtual = false;
+
+    if let Some(val) = index_data.get("map_to_resources") {
+        map_to_resources = val.as_bool().unwrap_or(false);
+    }
+    if let Some(val) = index_data.get("virtual") {
+        is_virtual = val.as_bool().unwrap_or(false);
+    }
+
     if let Some(objects) = index_data["objects"].as_object() {
         let objects_dir = assets_dir.join("objects");
+        let resources_dir = game_dir.join("resources");
+        let virtual_assets_dir = assets_dir.join("virtual").join("legacy");
+
+        if map_to_resources {
+            fs::create_dir_all(&resources_dir).await.map_err(|e| e.to_string())?;
+        }
+        if is_virtual {
+             fs::create_dir_all(&virtual_assets_dir).await.map_err(|e| e.to_string())?;
+        }
+
         // For performance, we should parallelize this. But strict sequential for now to avoid complexity.
         // Or simple concurrency.
-        for (_name, obj) in objects {
+        for (name, obj) in objects {
             if let Some(hash) = obj["hash"].as_str()
                 && hash.len() >= 2
             {
@@ -225,22 +245,84 @@ pub async fn prepare_and_launch(
                         Err(e) => println!("Failed to download asset {}: {}", hash, e),
                     }
                 }
+                
+                // Copy to resources if legacy (map_to_resources)
+                if map_to_resources && object_path.exists() {
+                     let res_path = resources_dir.join(name);
+                     if !res_path.exists() {
+                         if let Some(p) = res_path.parent() {
+                             fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+                         }
+                         fs::copy(&object_path, &res_path).await.map_err(|e| format!("Failed to copy legacy resource {}: {}", name, e))?;
+                     }
+                }
+
+                // Copy to virtual/legacy if virtual
+                if is_virtual && object_path.exists() {
+                     let virt_path = virtual_assets_dir.join(name);
+                     if !virt_path.exists() {
+                         if let Some(p) = virt_path.parent() {
+                             fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+                         }
+                         fs::copy(&object_path, &virt_path).await.map_err(|e| format!("Failed to copy virtual asset {}: {}", name, e))?;
+                     }
+                }
             }
         }
+
+        // Fix for VanillaTweakInjector looking in assets/icons instead of resources/icons
+        if map_to_resources {
+             let src_icons = resources_dir.join("icons");
+             let dst_icons = assets_dir.join("icons");
+             if src_icons.exists() && !dst_icons.exists() {
+                 fs::create_dir_all(&dst_icons).await.map_err(|e| e.to_string())?;
+                 
+                 let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
+                 while let Ok(Some(entry)) = entries.next_entry().await {
+                     let path = entry.path();
+                     if path.is_file() {
+                         let name = entry.file_name();
+                         fs::copy(&path, dst_icons.join(name)).await.map_err(|e| e.to_string())?;
+                     }
+                 }
+             }
+
+             // Also copy to virtual assets dir if active
+             if is_virtual {
+                 let virt_icons = virtual_assets_dir.join("icons");
+                 if src_icons.exists() && !virt_icons.exists() {
+                     fs::create_dir_all(&virt_icons).await.map_err(|e| e.to_string())?;
+                     let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
+                     while let Ok(Some(entry)) = entries.next_entry().await {
+                         let path = entry.path();
+                         if path.is_file() {
+                             let name = entry.file_name();
+                             fs::copy(&path, virt_icons.join(name)).await.map_err(|e| e.to_string())?;
+                         }
+                     }
+                 }
+             }
+         }
     }
 
     // 6. Build Config
+    let launch_assets_dir = if is_virtual {
+        assets_dir.join("virtual").join("legacy")
+    } else {
+        assets_dir.clone()
+    };
+
     let config = VanillaLaunchConfig {
         java_path,
         game_dir: game_dir.clone(),
-        assets_dir,
+        assets_dir: launch_assets_dir,
         classpath,
         main_class: version_data.main_class,
         version_name: version_id.to_string(),
         asset_index: Some(version_data.asset_index.id),
         resolution: Some(Resolution {
-            width: 854,
-            height: 480,
+            width: 1280,
+            height: 720,
         }),
         memory: Some(MemorySettings {
             min_megabytes: 1024,
