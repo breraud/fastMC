@@ -1,5 +1,5 @@
 use crate::instance_manager::{InstanceManager, InstanceMetadata};
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Color, Element, Length, Task};
 
 #[derive(Debug, Clone)]
@@ -102,9 +102,9 @@ impl PlayScreen {
             .and_then(|id| self.instances.iter().find(|i| &i.id == id))
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
-        let hero_section = self.view_hero();
-        let profiles_list = self.view_profiles_list();
+    pub fn view(&self, assets: Option<&crate::assets::AssetStore>) -> Element<'_, Message> {
+        let hero_section = self.view_hero(assets);
+        let profiles_list = self.view_profiles_list(assets);
 
         let mut content = column![hero_section, profiles_list]
             .spacing(20)
@@ -137,7 +137,7 @@ impl PlayScreen {
         content.into()
     }
 
-    fn view_hero(&self) -> Element<'_, Message> {
+    fn view_hero(&self, assets: Option<&crate::assets::AssetStore>) -> Element<'_, Message> {
         let (name, version, _last_played) = if let Some(instance) = self.active_instance() {
             (
                 instance.name.clone(),
@@ -223,8 +223,16 @@ impl PlayScreen {
         .spacing(10)
         .padding(40);
 
-        // Background Image (No styling, just the widget)
-        let bg_image = iced::widget::image("assets/instances_images/default.jpg")
+        // Background Image
+        let bg_image = if let Some(assets) = assets {
+             if let Some(handle) = assets.get_image("instances_images/default.jpg") {
+                  iced::widget::image(handle)
+             } else {
+                  iced::widget::image("assets/instances_images/default.jpg")
+             }
+        } else {
+             iced::widget::image("assets/instances_images/default.jpg")
+        }
             .content_fit(iced::ContentFit::Cover)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -258,13 +266,13 @@ impl PlayScreen {
         .into()
     }
 
-    fn view_profiles_list(&self) -> Element<'_, Message> {
+    fn view_profiles_list(&self, assets: Option<&crate::assets::AssetStore>) -> Element<'_, Message> {
         let header = row![
             text("Your Profiles").size(18).color(Color::WHITE),
             iced::widget::Space::new().width(Length::Fill),
             button(text("+ New Profile").size(14))
                 .padding([8, 16])
-                .style(|_theme, status| {
+                .style(|_theme, _status| {
                     let base = iced::widget::button::Style::default();
                     iced::widget::button::Style {
                         background: Some(iced::Color::TRANSPARENT.into()),
@@ -294,8 +302,19 @@ impl PlayScreen {
                 self.instances.iter().map(|inst| {
                     let is_active = self.active_instance_id.as_deref() == Some(&inst.id);
                     
+                    let icon_widget = if let Some(assets) = assets {
+                        // TODO: Use instance specific icon if available
+                         if let Some(handle) = assets.get_image("instances_images/default.jpg") {
+                              iced::widget::image(handle)
+                         } else {
+                              iced::widget::image("assets/instances_images/default.jpg")
+                         }
+                    } else {
+                         iced::widget::image("assets/instances_images/default.jpg")
+                    };
+
                     let icon_placeholder = container(
-                        iced::widget::image("assets/instances_images/default.jpg")
+                        icon_widget
                             .content_fit(iced::ContentFit::Cover)
                             .width(Length::Fill)
                             .height(Length::Fill)

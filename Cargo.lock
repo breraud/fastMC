@@ -1351,6 +1351,7 @@ dependencies = [
  "config_manager",
  "directories",
  "iced",
+ "image",
  "java_manager",
  "launcher",
  "md-5",

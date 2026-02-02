@@ -64,6 +64,7 @@ impl AccountScreen {
         self.store.clone()
     }
 
+    #[allow(dead_code)]
     pub fn get_microsoft_tokens(
         &self,
         account_id: &Uuid,

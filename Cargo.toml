@@ -24,3 +24,8 @@ uuid = {version = "1.10", features = ["v3", "v4", "v5", "serde"]}
 md-5 = "0.10"
 zip = "0.6"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "fs", "process"] }
+image = "0.25.9"
+
+# Optimize dependencies even in debug mode to speed up image decoding
+[profile.dev.package."*"]
+opt-level = 3

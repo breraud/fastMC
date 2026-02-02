@@ -1,8 +1,8 @@
 mod screens;
 use screens::{
     AccountMessage, AccountScreen, AccountUpdate, InstancesMessage, InstancesScreen,
-    JavaManagerMessage, JavaManagerScreen, ModpacksMessage, ModpacksScreen, PlayMessage, PlayScreen,
-    ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
+    JavaManagerMessage, JavaManagerScreen, LoadingScreen, ModpacksMessage, ModpacksScreen, PlayMessage,
+    PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
 };
 
 mod game;
@@ -10,6 +10,7 @@ mod theme;
 use theme::{icon_from_path, menu_button};
 
 pub mod instance_manager;
+pub mod assets;
 
 use account_manager::AccountKind;
 use config_manager::FastmcConfig;
@@ -29,10 +30,12 @@ pub enum Message {
     Resized(f32),
     Startup,
     AccountValidated(Result<String, String>),
+    AssetsLoaded(assets::AssetStore),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
+    Loading,
     AccountSetup,
     Main,
 }
@@ -49,6 +52,10 @@ pub enum MenuItem {
 
 struct App {
     stage: Stage,
+    loading: LoadingScreen,
+    assets: Option<assets::AssetStore>,
+    // Store validation result while waiting for assets
+    validation_result: Option<Result<String, String>>,
     selected_menu: MenuItem,
     account: AccountScreen,
     play: PlayScreen,
@@ -72,14 +79,14 @@ impl App {
             .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
 
         let account = AccountScreen::new(client_id);
-        let stage = if account.has_accounts() {
-            Stage::Main
-        } else {
-            Stage::AccountSetup
-        };
+        // Start in "Loading" stage now
+        let stage = Stage::Loading;
 
         let app = Self {
             stage,
+            loading: LoadingScreen,
+            assets: None,
+            validation_result: None,
             selected_menu: MenuItem::Play,
             account,
             play: PlayScreen::default(),
@@ -369,45 +376,66 @@ impl App {
                                 .map_err(|e| e.to_string())?;
                             Ok(account.display_name.clone())
                         } else {
-                            // No client ID means we can't validate Microsoft accounts,
-                            // but we might not have one active.
-                            // For now, just assume success or return a distinctive message.
                             Ok("Offline/NoID".to_string())
                         }
                     },
                     Message::AccountValidated,
                 );
 
-                iced::Task::batch(vec![refresh_task, validation_task])
+                let assets_task = iced::Task::perform(
+                    assets::AssetStore::load(),
+                    Message::AssetsLoaded
+                );
+
+                iced::Task::batch(vec![refresh_task, validation_task, assets_task])
+            }
+            Message::AssetsLoaded(store) => {
+                 self.assets = Some(store);
+                 
+                 // If we already have a validation result, we can try to transition
+                 if let Some(result) = self.validation_result.clone() {
+                     return self.handle_startup_completion(result);
+                 }
+                 
+                 iced::Task::none()
             }
             Message::AccountValidated(result) => {
-                match result {
-                    Ok(_) => {
-                        self.stage = Stage::Main;
-                    }
-                    Err(e) => {
-                        println!("Account validation failed: {}", e);
-                        // If validation fails, force back to account setup
-                        self.stage = Stage::AccountSetup;
-                        // Reload account screen to pick up the "requires_login" state change from disk
-                        // Since AccountScreen loads from disk on `new`, we can just re-init it or add a reload method.
-                        // For simplicity let's re-init.
-                        let config = FastmcConfig::load().unwrap_or_default();
-                        let client_id = config
-                            .accounts
-                            .microsoft_client_id
-                            .clone()
-                            .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
-                        self.account = AccountScreen::new(client_id);
-                    }
+                self.validation_result = Some(result.clone());
+
+                // Only switch if we have assets
+                if self.assets.is_some() {
+                    return self.handle_startup_completion(result);
                 }
+                
                 iced::Task::none()
             }
         }
     }
 
+    fn handle_startup_completion(&mut self, result: Result<String, String>) -> iced::Task<Message> {
+        match result {
+            Ok(_) => {
+                self.stage = Stage::Main;
+            }
+            Err(e) => {
+                println!("Account validation failed: {}", e);
+                self.stage = Stage::AccountSetup;
+                // Reload account screen
+                let config = FastmcConfig::load().unwrap_or_default();
+                let client_id = config
+                    .accounts
+                    .microsoft_client_id
+                    .clone()
+                    .or_else(|| DEV_MICROSOFT_CLIENT_ID.map(|s| s.to_string()));
+                self.account = AccountScreen::new(client_id);
+            }
+        }
+        iced::Task::none()
+    }
+
     fn view(&self) -> iced::Element<'_, Message> {
         match self.stage {
+            Stage::Loading => self.loading.view().map(|_| Message::Startup), // Helper, actually message is ignored
             Stage::AccountSetup => self
                 .account
                 .view()
@@ -424,7 +452,7 @@ impl App {
         let divider_color = iced::Color::from_rgb(0.18, 0.18, 0.21);
 
         let content = match self.selected_menu {
-            MenuItem::Play => self.play.view().map(Message::PlayScreen),
+            MenuItem::Play => self.play.view(self.assets.as_ref()).map(Message::PlayScreen),
             MenuItem::Server => self.server.view().map(Message::ServerScreen),
             MenuItem::Modpacks => self.modpacks.view().map(Message::ModpacksScreen),
             MenuItem::JavaManager => self.java_manager.view().map(Message::JavaManagerScreen),
@@ -514,7 +542,26 @@ impl App {
                 .spacing(12)
                 .width(iced::Length::Fill),
             |col, (item, label, path)| {
-                let icon = icon_from_path::<Message>(path);
+                // Try from store, fallback to path if needed (though store handles path internally currently)
+                // We need to update icon_from_path to use store if possible.
+                // For now, let's just stick to the old way for a second, then refactor the helper.
+                // Actually, let's implement the store usage here.
+                
+                let icon = if let Some(store) = &self.assets {
+                    // path is like "assets/svg/play.svg", we stored keys as "play.svg"
+                    let filename = std::path::Path::new(path).file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    if let Some(handle) = store.get_icon(filename) {
+                         iced::widget::svg(handle)
+                            .width(iced::Length::Fixed(24.0))
+                            .height(iced::Length::Fixed(24.0))
+                            .into()
+                    } else {
+                         icon_from_path::<Message>(path)
+                    }
+                } else {
+                    icon_from_path::<Message>(path)
+                };
+
                 let is_active = self.selected_menu == item;
                 let mut button =
                     menu_button(Some(icon), label, is_active).width(iced::Length::Fill);

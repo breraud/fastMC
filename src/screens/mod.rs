@@ -13,3 +13,6 @@ pub use server::{Message as ServerMessage, ServerScreen};
 pub use settings::{Message as SettingsMessage, SettingsScreen};
 pub mod instances;
 pub use instances::{InstancesScreen, Message as InstancesMessage};
+
+pub mod loading;
+pub use loading::LoadingScreen;
