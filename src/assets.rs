@@ -49,7 +49,10 @@ impl AssetStore {
 
         // Load Images (e.g. default instance background)
         let images = vec![
-             "instances_images/default.jpg"
+             "instances_images/default.jpg",
+             "favicon.png",
+             "favicon_noblur.png",
+             "wide_logo.png"
         ];
         
         for rel_path in images {

@@ -15,6 +15,7 @@ pub mod assets;
 use account_manager::AccountKind;
 use config_manager::FastmcConfig;
 use iced::window;
+use image as image_crate;
 
 #[derive(Clone)]
 pub enum Message {
@@ -489,43 +490,22 @@ impl App {
             (MenuItem::Settings, "Settings", "assets/svg/settings.svg"),
         ];
 
-        let badge = iced::widget::container(iced::widget::text("MC").size(18).style(move |_| {
-            iced::widget::text::Style {
-                color: Some(iced::Color::WHITE),
+        let header: iced::Element<Message> = if let Some(store) = &self.assets {
+            if let Some(handle) = store.get_image("wide_logo.png") {
+                 iced::widget::container(
+                    iced::widget::image(handle)
+                        .width(iced::Length::Fill)
+                        .content_fit(iced::ContentFit::Contain)
+                 )
+                 .width(iced::Length::Fill)
+                 .align_x(iced::Alignment::Center)
+                 .into()
+            } else {
+                 iced::widget::text("FastMC").size(24).into()
             }
-        }))
-        .padding([10, 14])
-        .width(iced::Length::Fixed(52.0))
-        .height(iced::Length::Fixed(52.0))
-        .align_x(iced::Alignment::Center)
-        .align_y(iced::Alignment::Center)
-        .style(move |_| iced::widget::container::Style {
-            background: Some(accent.into()),
-            border: iced::Border {
-                radius: 14.0.into(),
-                ..iced::Border::default()
-            },
-            ..iced::widget::container::Style::default()
-        });
-
-        let header = iced::widget::row![
-            badge,
-            iced::widget::column![
-                iced::widget::text("Minecraft").size(20).style(move |_| {
-                    iced::widget::text::Style {
-                        color: Some(text_primary),
-                    }
-                }),
-                iced::widget::text("Launcher")
-                    .size(14)
-                    .style(move |_| iced::widget::text::Style {
-                        color: Some(text_muted),
-                    }),
-            ]
-            .spacing(2)
-        ]
-        .spacing(14)
-        .align_y(iced::Alignment::Center);
+        } else {
+             iced::widget::text("FastMC").size(24).into()
+        };
 
         let top_divider = iced::widget::container(
             iced::widget::Space::new()
@@ -687,7 +667,12 @@ impl App {
         .height(iced::Length::Fill);
 
         let menu_container = iced::widget::container(sidebar_content)
-            .padding([20, 18])
+            .padding(iced::Padding {
+                top: 10.0,
+                right: 18.0,
+                bottom: 20.0,
+                left: 18.0,
+            })
             .width(iced::Length::Fixed(280.0))
             .height(iced::Length::Fill)
             .style(move |_| iced::widget::container::Style {
@@ -713,9 +698,22 @@ impl App {
     }
 }
 
+
+fn load_icon() -> Option<iced::window::Icon> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/favicon.png");
+    let img = image_crate::open(path).ok()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    let rgba = img.into_raw();
+    iced::window::icon::from_rgba(rgba, width, height).ok()
+}
+
 pub fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
         .title("FastMC Launcher")
+        .window(iced::window::Settings {
+            icon: load_icon(),
+            ..Default::default()
+        })
         .theme(iced::Theme::Dracula)
         .subscription(|_| window::resize_events().map(|(_, size)| Message::Resized(size.width)))
         .run()
