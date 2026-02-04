@@ -1,5 +1,7 @@
 use crate::instance_manager::{InstanceManager, InstanceMetadata};
-use iced::widget::{button, checkbox, column, container, pick_list, row, scrollable, text, text_input};
+use iced::widget::{
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+};
 use iced::{Alignment, Color, Element, Length, Task};
 
 #[derive(Debug, Clone)]
@@ -26,7 +28,6 @@ pub struct InstancesScreen {
     selected_version: Option<String>,
     show_snapshots: bool,
     status_msg: Option<String>,
-
 }
 
 impl InstancesScreen {
@@ -34,7 +35,7 @@ impl InstancesScreen {
         let manager = InstanceManager::new();
         // Ensure directory exists
         let _ = manager.init();
-        
+
         Self {
             instances: Vec::new(),
             manager,
@@ -60,10 +61,7 @@ impl InstancesScreen {
     pub fn refresh(&self) -> Task<Message> {
         let manager = self.manager.clone();
         Task::batch(vec![
-            Task::perform(
-                async move { manager.list_instances() },
-                Message::Loaded,
-            ),
+            Task::perform(async move { manager.list_instances() }, Message::Loaded),
             self.fetch_versions(),
         ])
     }
@@ -83,33 +81,36 @@ impl InstancesScreen {
                 if self.create_name.trim().is_empty() {
                     return Task::none();
                 }
-                
+
                 let name = self.create_name.clone();
-                let version = self.selected_version.clone().unwrap_or_else(|| "1.21".to_string());
+                let version = self
+                    .selected_version
+                    .clone()
+                    .unwrap_or_else(|| "1.21".to_string());
                 let manager = self.manager.clone();
-                
+
                 self.status_msg = Some("Creating instance...".to_string());
-                
+
                 Task::perform(
                     async move {
-                        manager.create_instance(name, version).map_err(|e| e.to_string())
+                        manager
+                            .create_instance(name, version)
+                            .map_err(|e| e.to_string())
                     },
                     Message::InstanceCreated,
                 )
             }
-            Message::InstanceCreated(result) => {
-                match result {
-                    Ok(_) => {
-                        self.create_name.clear();
-                        self.status_msg = Some("Instance created!".to_string());
-                        self.refresh()
-                    }
-                    Err(e) => {
-                        self.status_msg = Some(format!("Error: {}", e));
-                        Task::none()
-                    }
+            Message::InstanceCreated(result) => match result {
+                Ok(_) => {
+                    self.create_name.clear();
+                    self.status_msg = Some("Instance created!".to_string());
+                    self.refresh()
                 }
-            }
+                Err(e) => {
+                    self.status_msg = Some(format!("Error: {}", e));
+                    Task::none()
+                }
+            },
             Message::DeleteInstance(id) => {
                 let manager = self.manager.clone();
                 Task::perform(
@@ -120,18 +121,16 @@ impl InstancesScreen {
                     Message::InstanceDeleted,
                 )
             }
-            Message::InstanceDeleted(result) => {
-                match result {
-                    Ok(_) => {
-                        self.status_msg = Some("Instance deleted.".to_string());
-                        self.refresh()
-                    }
-                    Err(e) => {
-                        self.status_msg = Some(format!("Delete error: {}", e));
-                        Task::none()
-                    }
+            Message::InstanceDeleted(result) => match result {
+                Ok(_) => {
+                    self.status_msg = Some("Instance deleted.".to_string());
+                    self.refresh()
                 }
-            }
+                Err(e) => {
+                    self.status_msg = Some(format!("Delete error: {}", e));
+                    Task::none()
+                }
+            },
             Message::LaunchInstance(_) => Task::none(), // Handled by parent
             Message::LaunchFinished(result) => {
                 match result {
@@ -145,11 +144,15 @@ impl InstancesScreen {
                 Task::none()
             }
             Message::VersionsLoaded(result) => {
-                 match result {
+                match result {
                     Ok(versions) => {
                         self.available_versions = versions;
                         // Default to latest release if available
-                        if let Some(latest) = self.available_versions.iter().find(|v| v.type_ == version_manager::VersionType::Release) {
+                        if let Some(latest) = self
+                            .available_versions
+                            .iter()
+                            .find(|v| v.type_ == version_manager::VersionType::Release)
+                        {
                             if self.selected_version.is_none() {
                                 self.selected_version = Some(latest.id.clone());
                             }
@@ -187,11 +190,13 @@ impl InstancesScreen {
             .padding(10)
             .width(Length::Fixed(300.0));
 
-        let version_list: Vec<String> = self.available_versions.iter()
+        let version_list: Vec<String> = self
+            .available_versions
+            .iter()
             .filter(|v| self.show_snapshots || v.type_ == version_manager::VersionType::Release)
             .map(|v| v.id.clone())
             .collect();
-            
+
         let version_picker = pick_list(
             std::borrow::Cow::Owned(version_list),
             self.selected_version.clone(),
@@ -199,14 +204,16 @@ impl InstancesScreen {
         )
         .placeholder("Select Version")
         .width(Length::Fixed(150.0));
-            
+
         let create_btn = button(text("Create"))
             .on_press(Message::CreateInstance)
             .padding(10)
             .style(iced::widget::button::primary);
 
         let snapshot_toggle = row![
-            checkbox(self.show_snapshots).on_toggle(Message::ToggleSnapshots).size(16),
+            checkbox(self.show_snapshots)
+                .on_toggle(Message::ToggleSnapshots)
+                .size(16),
             text("Show Snapshots").size(14).color(Color::WHITE)
         ]
         .spacing(8)
@@ -225,58 +232,68 @@ impl InstancesScreen {
 
         // List
         let list_content = if self.instances.is_empty() {
-             column![
-                text("No instances found.").size(16).color(Color::from_rgb(0.7, 0.7, 0.7))
-             ]
-             .width(Length::Fill)
-             .align_x(Alignment::Center)
+            column![
+                text("No instances found.")
+                    .size(16)
+                    .color(Color::from_rgb(0.7, 0.7, 0.7))
+            ]
+            .width(Length::Fill)
+            .align_x(Alignment::Center)
         } else {
             column(
-                self.instances.iter().map(|inst| {
-                    let info = column![
-                        text(&inst.name).size(18).color(Color::WHITE),
-                        text(format!("{} • {}", inst.game_version, format!("{:?}", inst.loader)))
+                self.instances
+                    .iter()
+                    .map(|inst| {
+                        let info = column![
+                            text(&inst.name).size(18).color(Color::WHITE),
+                            text(format!(
+                                "{} • {}",
+                                inst.game_version,
+                                format!("{:?}", inst.loader)
+                            ))
                             .size(12)
                             .color(Color::from_rgb(0.6, 0.6, 0.6))
-                    ];
-                    
-                    let delete_btn = button(text("Delete").size(12))
-                        .on_press(Message::DeleteInstance(inst.id.clone()))
-                        .padding([5, 10])
-                        .style(iced::widget::button::danger);
+                        ];
 
-                    let launch_btn = button(text("Launch").size(12))
-                        .on_press(Message::LaunchInstance(inst.id.clone()))
-                        .padding([5, 10])
-                        .style(iced::widget::button::success);
+                        let delete_btn = button(text("Delete").size(12))
+                            .on_press(Message::DeleteInstance(inst.id.clone()))
+                            .padding([5, 10])
+                            .style(iced::widget::button::danger);
 
-                    container(
-                        row![info, iced::widget::Space::new().width(Length::Fill), launch_btn, delete_btn]
+                        let launch_btn = button(text("Launch").size(12))
+                            .on_press(Message::LaunchInstance(inst.id.clone()))
+                            .padding([5, 10])
+                            .style(iced::widget::button::success);
+
+                        container(
+                            row![
+                                info,
+                                iced::widget::Space::new().width(Length::Fill),
+                                launch_btn,
+                                delete_btn
+                            ]
                             .spacing(10)
-                            .align_y(Alignment::Center)
-                    )
-                    .padding(10)
-                    .style(|_| iced::widget::container::Style {
-                        background: Some(Color::from_rgb(0.18, 0.18, 0.20).into()),
-                        border: iced::Border {
-                            radius: 6.0.into(),
-                            ..iced::Border::default()
-                        },
-                        ..iced::widget::container::Style::default()
+                            .align_y(Alignment::Center),
+                        )
+                        .padding(10)
+                        .style(|_| iced::widget::container::Style {
+                            background: Some(Color::from_rgb(0.18, 0.18, 0.20).into()),
+                            border: iced::Border {
+                                radius: 6.0.into(),
+                                ..iced::Border::default()
+                            },
+                            ..iced::widget::container::Style::default()
+                        })
+                        .into()
                     })
-                    .into()
-                }).collect::<Vec<_>>()
-            ).spacing(10)
+                    .collect::<Vec<_>>(),
+            )
+            .spacing(10)
         };
 
-        let content = column![
-            title,
-            create_row,
-            status,
-            scrollable(list_content)
-        ]
-        .spacing(20)
-        .padding(20);
+        let content = column![title, create_row, status, scrollable(list_content)]
+            .spacing(20)
+            .padding(20);
 
         content.into()
     }

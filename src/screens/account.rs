@@ -114,8 +114,12 @@ impl AccountScreen {
                     let client_id = client_id.clone();
                     let task = Task::perform(
                         async move {
-                            let service = AccountService::new(client_id).map_err(|e| e.to_string())?;
-                            service.start_microsoft_device_code().await.map_err(|e| e.to_string())
+                            let service =
+                                AccountService::new(client_id).map_err(|e| e.to_string())?;
+                            service
+                                .start_microsoft_device_code()
+                                .await
+                                .map_err(|e| e.to_string())
                         },
                         |result| Message::MicrosoftCodeReady(Box::new(result)),
                     );

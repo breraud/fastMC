@@ -1,10 +1,10 @@
+pub mod fabric;
 pub mod models;
 pub mod vanilla;
-pub mod fabric;
 
+pub use fabric::*;
 pub use models::*;
 pub use vanilla::*;
-pub use fabric::*;
 
 #[cfg(test)]
 mod tests {
@@ -29,4 +29,3 @@ mod tests {
         println!("Found {} fabric loaders", loaders.len());
     }
 }
-

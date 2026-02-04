@@ -37,11 +37,13 @@ impl AssetStore {
         for name in svgs {
             let path = assets_dir.join("svg").join(name);
             if path.exists() {
-               if let Ok(bytes) = tokio::fs::read(&path).await {
-                   store.icons.insert(name.to_string(), svg::Handle::from_memory(bytes));
-               } else {
-                   eprintln!("Warning: Failed to read icon: {:?}", path);
-               }
+                if let Ok(bytes) = tokio::fs::read(&path).await {
+                    store
+                        .icons
+                        .insert(name.to_string(), svg::Handle::from_memory(bytes));
+                } else {
+                    eprintln!("Warning: Failed to read icon: {:?}", path);
+                }
             } else {
                 eprintln!("Warning: Icon not found: {:?}", path);
             }
@@ -49,44 +51,44 @@ impl AssetStore {
 
         // Load Images (e.g. default instance background)
         let images = vec![
-             "instances_images/default.jpg",
-             "favicon.png",
-             "favicon_noblur.png",
-             "wide_logo.png"
+            "instances_images/default.jpg",
+            "favicon.png",
+            "favicon_noblur.png",
+            "wide_logo.png",
         ];
-        
+
         for rel_path in images {
-             let path = assets_dir.join(rel_path);
-             if path.exists() {
-                 let key = rel_path.to_string();
-                 if let Ok(bytes) = tokio::fs::read(&path).await {
-                     // Decode image to RGBA8 to ensure it's ready for GPU
-                     // This happens in the background task
-                     match image_crate::load_from_memory(&bytes) {
-                         Ok(img) => {
-                             let rgba = img.to_rgba8();
-                             let width = rgba.width();
-                             let height = rgba.height();
-                             let pixels = rgba.into_raw();
-                             
-                             let handle = iced_image::Handle::from_rgba(width, height, pixels);
-                             store.images.insert(key, handle);
-                         },
-                         Err(e) => {
-                             eprintln!("Warning: Failed to decode image {:?}: {}", path, e);
-                         }
-                     }
-                 } else {
+            let path = assets_dir.join(rel_path);
+            if path.exists() {
+                let key = rel_path.to_string();
+                if let Ok(bytes) = tokio::fs::read(&path).await {
+                    // Decode image to RGBA8 to ensure it's ready for GPU
+                    // This happens in the background task
+                    match image_crate::load_from_memory(&bytes) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            let width = rgba.width();
+                            let height = rgba.height();
+                            let pixels = rgba.into_raw();
+
+                            let handle = iced_image::Handle::from_rgba(width, height, pixels);
+                            store.images.insert(key, handle);
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to decode image {:?}: {}", path, e);
+                        }
+                    }
+                } else {
                     eprintln!("Warning: Failed to read image: {:?}", path);
-                 }
-             } else {
-                 eprintln!("Warning: Image not found: {:?}", path);
-             }
+                }
+            } else {
+                eprintln!("Warning: Image not found: {:?}", path);
+            }
         }
 
         store
     }
-    
+
     pub fn get_icon(&self, name: &str) -> Option<svg::Handle> {
         self.icons.get(name).cloned()
     }

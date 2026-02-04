@@ -21,12 +21,12 @@ pub struct InstanceMetadata {
     pub created: u64,
     pub last_played: u64,
     pub total_time: u64,
-    
+
     // Components
     pub game_version: String,
     pub loader: ModLoader,
     pub loader_version: Option<String>,
-    
+
     // Java Overrides
     pub java_path: Option<String>,
     pub memory_mb: Option<u32>,
@@ -95,16 +95,24 @@ impl InstanceManager {
                 }
             }
         }
-        
+
         // Sort by last played (descending), then created
-        instances.sort_by(|a, b| b.last_played.cmp(&a.last_played).then(b.created.cmp(&a.created)));
+        instances.sort_by(|a, b| {
+            b.last_played
+                .cmp(&a.last_played)
+                .then(b.created.cmp(&a.created))
+        });
 
         instances
     }
 
-    pub fn create_instance(&self, name: String, version: String) -> std::io::Result<InstanceMetadata> {
+    pub fn create_instance(
+        &self,
+        name: String,
+        version: String,
+    ) -> std::io::Result<InstanceMetadata> {
         self.init()?;
-        
+
         // Generate safe directory name
         let id = Uuid::new_v4().to_string();
         let instance_dir = self.base_dir.join(&id);

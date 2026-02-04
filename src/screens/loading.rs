@@ -1,4 +1,4 @@
-use iced::widget::{column, container, text, Space};
+use iced::widget::{Space, column, container, text};
 use iced::{Color, Element, Length};
 
 #[derive(Debug, Clone)]
@@ -16,18 +16,17 @@ impl LoadingScreen {
                 color: Some(Color::WHITE),
             });
 
-        let subtitle = text("Preparing your adventure...")
-            .size(16)
-            .style(|_| iced::widget::text::Style {
-                color: Some(Color::from_rgb(0.7, 0.7, 0.7)),
-            });
+        let subtitle =
+            text("Preparing your adventure...")
+                .size(16)
+                .style(|_| iced::widget::text::Style {
+                    color: Some(Color::from_rgb(0.7, 0.7, 0.7)),
+                });
 
         // Simple spinner simulation using text for now, could be a real widget later
-        let spinner = text("...")
-            .size(24)
-            .style(|_| iced::widget::text::Style {
-                color: Some(Color::from_rgb(0.13, 0.77, 0.36)), // Accent green
-            });
+        let spinner = text("...").size(24).style(|_| iced::widget::text::Style {
+            color: Some(Color::from_rgb(0.13, 0.77, 0.36)), // Accent green
+        });
 
         let content = column![
             title,

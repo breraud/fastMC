@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::fs;
 
-
 #[allow(dead_code)]
 pub enum LaunchProgress {
     Downloading(String, f32), // File, percentage
@@ -67,7 +66,7 @@ struct Library {
 #[derive(Debug, Deserialize)]
 struct LibraryDownloads {
     artifact: Option<DownloadFile>,
-    classifiers: Option<serde_json::Value>, 
+    classifiers: Option<serde_json::Value>,
 }
 
 pub async fn prepare_and_launch(
@@ -83,10 +82,18 @@ pub async fn prepare_and_launch(
     let assets_dir = game_dir.join("assets");
     let natives_dir = game_dir.join("natives").join(version_id);
 
-    fs::create_dir_all(&versions_dir).await.map_err(|e| e.to_string())?;
-    fs::create_dir_all(&libraries_dir).await.map_err(|e| e.to_string())?;
-    fs::create_dir_all(&assets_dir).await.map_err(|e| e.to_string())?;
-    fs::create_dir_all(&natives_dir).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(&versions_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&libraries_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&assets_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    fs::create_dir_all(&natives_dir)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // 2. Fetch Manifest
     let version_json_path = versions_dir
@@ -98,14 +105,16 @@ pub async fn prepare_and_launch(
     // We can't use a closure easily with async recursion/await inside without BoxFuture.
     // So we'll just inline the logic or use a loop.
     let version_data: VersionData = if version_json_path.exists() {
-         let content = fs::read_to_string(&version_json_path).await.map_err(|e| e.to_string())?;
-         match serde_json::from_str::<VersionData>(&content) {
+        let content = fs::read_to_string(&version_json_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        match serde_json::from_str::<VersionData>(&content) {
             Ok(data) => data,
             Err(_) => {
                 println!("Local manifest corrupted. Re-downloading...");
                 fetch_manifest(version_id, &versions_dir, &version_json_path).await?
             }
-         }
+        }
     } else {
         fetch_manifest(version_id, &versions_dir, &version_json_path).await?
     };
@@ -133,7 +142,9 @@ pub async fn prepare_and_launch(
 
             if !lib_path.exists() {
                 if let Some(parent) = lib_path.parent() {
-                    fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+                    fs::create_dir_all(parent)
+                        .await
+                        .map_err(|e| e.to_string())?;
                 }
                 download_file(&artifact.url, &lib_path).await?;
             }
@@ -154,8 +165,12 @@ pub async fn prepare_and_launch(
 
             if let Some(native_obj) = classifiers.get(os_classifier) {
                 if let Ok(file_info) = serde_json::from_value::<DownloadFile>(native_obj.clone()) {
-                    let nat_path = libraries_dir.join(format!("{}-{}.jar", lib.name.replace(':', "-"), os_classifier));
-                    
+                    let nat_path = libraries_dir.join(format!(
+                        "{}-{}.jar",
+                        lib.name.replace(':', "-"),
+                        os_classifier
+                    ));
+
                     if !nat_path.exists() {
                         download_file(&file_info.url, &nat_path).await?;
                     }
@@ -163,13 +178,15 @@ pub async fn prepare_and_launch(
                     // Extract (Synchronous - handled in blocking task)
                     let nat_path_clone = nat_path.clone();
                     let natives_dir_clone = natives_dir.clone();
-                    
+
                     tokio::task::spawn_blocking(move || {
                         if let Ok(file) = std::fs::File::open(&nat_path_clone) {
                             if let Ok(mut archive) = zip::ZipArchive::new(file) {
                                 for i in 0..archive.len() {
                                     if let Ok(mut file) = archive.by_index(i) {
-                                        if file.name().contains("META-INF") { continue; }
+                                        if file.name().contains("META-INF") {
+                                            continue;
+                                        }
                                         let outpath = natives_dir_clone.join(file.name());
                                         if let Some(p) = outpath.parent() {
                                             std::fs::create_dir_all(p).ok();
@@ -181,7 +198,9 @@ pub async fn prepare_and_launch(
                                 }
                             }
                         }
-                    }).await.map_err(|e| e.to_string())?;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -194,13 +213,17 @@ pub async fn prepare_and_launch(
         .join(format!("{}.json", version_data.asset_index.id));
     if !asset_index_path.exists() {
         if let Some(parent) = asset_index_path.parent() {
-            fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         download_file(&version_data.asset_index.url, &asset_index_path).await?;
     }
 
     println!("Verifying assets from index: {:?}", asset_index_path);
-    let index_content = fs::read_to_string(&asset_index_path).await.map_err(|e| e.to_string())?;
+    let index_content = fs::read_to_string(&asset_index_path)
+        .await
+        .map_err(|e| e.to_string())?;
     let index_data: serde_json::Value =
         serde_json::from_str(&index_content).map_err(|e| e.to_string())?;
 
@@ -220,10 +243,14 @@ pub async fn prepare_and_launch(
         let virtual_assets_dir = assets_dir.join("virtual").join("legacy");
 
         if map_to_resources {
-            fs::create_dir_all(&resources_dir).await.map_err(|e| e.to_string())?;
+            fs::create_dir_all(&resources_dir)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         if is_virtual {
-             fs::create_dir_all(&virtual_assets_dir).await.map_err(|e| e.to_string())?;
+            fs::create_dir_all(&virtual_assets_dir)
+                .await
+                .map_err(|e| e.to_string())?;
         }
 
         // For performance, we should parallelize this. But strict sequential for now to avoid complexity.
@@ -236,73 +263,90 @@ pub async fn prepare_and_launch(
                 let object_path = objects_dir.join(prefix).join(hash);
 
                 if !object_path.exists() {
-                    let url = format!("https://resources.download.minecraft.net/{}/{}", prefix, hash);
+                    let url = format!(
+                        "https://resources.download.minecraft.net/{}/{}",
+                        prefix, hash
+                    );
                     if let Some(parent) = object_path.parent() {
-                        fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+                        fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| e.to_string())?;
                     }
-                     match download_file(&url, &object_path).await {
+                    match download_file(&url, &object_path).await {
                         Ok(_) => {}
                         Err(e) => println!("Failed to download asset {}: {}", hash, e),
                     }
                 }
-                
+
                 // Copy to resources if legacy (map_to_resources)
                 if map_to_resources && object_path.exists() {
-                     let res_path = resources_dir.join(name);
-                     if !res_path.exists() {
-                         if let Some(p) = res_path.parent() {
-                             fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
-                         }
-                         fs::copy(&object_path, &res_path).await.map_err(|e| format!("Failed to copy legacy resource {}: {}", name, e))?;
-                     }
+                    let res_path = resources_dir.join(name);
+                    if !res_path.exists() {
+                        if let Some(p) = res_path.parent() {
+                            fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+                        }
+                        fs::copy(&object_path, &res_path).await.map_err(|e| {
+                            format!("Failed to copy legacy resource {}: {}", name, e)
+                        })?;
+                    }
                 }
 
                 // Copy to virtual/legacy if virtual
                 if is_virtual && object_path.exists() {
-                     let virt_path = virtual_assets_dir.join(name);
-                     if !virt_path.exists() {
-                         if let Some(p) = virt_path.parent() {
-                             fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
-                         }
-                         fs::copy(&object_path, &virt_path).await.map_err(|e| format!("Failed to copy virtual asset {}: {}", name, e))?;
-                     }
+                    let virt_path = virtual_assets_dir.join(name);
+                    if !virt_path.exists() {
+                        if let Some(p) = virt_path.parent() {
+                            fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+                        }
+                        fs::copy(&object_path, &virt_path)
+                            .await
+                            .map_err(|e| format!("Failed to copy virtual asset {}: {}", name, e))?;
+                    }
                 }
             }
         }
 
         // Fix for VanillaTweakInjector looking in assets/icons instead of resources/icons
         if map_to_resources {
-             let src_icons = resources_dir.join("icons");
-             let dst_icons = assets_dir.join("icons");
-             if src_icons.exists() && !dst_icons.exists() {
-                 fs::create_dir_all(&dst_icons).await.map_err(|e| e.to_string())?;
-                 
-                 let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
-                 while let Ok(Some(entry)) = entries.next_entry().await {
-                     let path = entry.path();
-                     if path.is_file() {
-                         let name = entry.file_name();
-                         fs::copy(&path, dst_icons.join(name)).await.map_err(|e| e.to_string())?;
-                     }
-                 }
-             }
+            let src_icons = resources_dir.join("icons");
+            let dst_icons = assets_dir.join("icons");
+            if src_icons.exists() && !dst_icons.exists() {
+                fs::create_dir_all(&dst_icons)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-             // Also copy to virtual assets dir if active
-             if is_virtual {
-                 let virt_icons = virtual_assets_dir.join("icons");
-                 if src_icons.exists() && !virt_icons.exists() {
-                     fs::create_dir_all(&virt_icons).await.map_err(|e| e.to_string())?;
-                     let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
-                     while let Ok(Some(entry)) = entries.next_entry().await {
-                         let path = entry.path();
-                         if path.is_file() {
-                             let name = entry.file_name();
-                             fs::copy(&path, virt_icons.join(name)).await.map_err(|e| e.to_string())?;
-                         }
-                     }
-                 }
-             }
-         }
+                let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let name = entry.file_name();
+                        fs::copy(&path, dst_icons.join(name))
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+            }
+
+            // Also copy to virtual assets dir if active
+            if is_virtual {
+                let virt_icons = virtual_assets_dir.join("icons");
+                if src_icons.exists() && !virt_icons.exists() {
+                    fs::create_dir_all(&virt_icons)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let mut entries = fs::read_dir(&src_icons).await.map_err(|e| e.to_string())?;
+                    while let Ok(Some(entry)) = entries.next_entry().await {
+                        let path = entry.path();
+                        if path.is_file() {
+                            let name = entry.file_name();
+                            fs::copy(&path, virt_icons.join(name))
+                                .await
+                                .map_err(|e| e.to_string())?;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 6. Build Config
@@ -349,20 +393,28 @@ pub async fn prepare_and_launch(
     Ok(config.build_command(&auth))
 }
 
-async fn fetch_manifest(version_id: &str, versions_dir: &Path, json_path: &Path) -> Result<VersionData, String> {
+async fn fetch_manifest(
+    version_id: &str,
+    versions_dir: &Path,
+    json_path: &Path,
+) -> Result<VersionData, String> {
     let manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     println!("Fetching main manifest from {}", manifest_url);
-    
+
     // Async client
     let client = reqwest::Client::new();
-    let resp = client.get(manifest_url).send().await.map_err(|e| e.to_string())?;
-    
+    let resp = client
+        .get(manifest_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
     if !resp.status().is_success() {
         return Err(format!("Failed to fetch manifest: {}", resp.status()));
     }
-    
+
     let manifest_json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    
+
     let version_url = manifest_json["versions"]
         .as_array()
         .ok_or("Invalid manifest format")?
@@ -374,14 +426,22 @@ async fn fetch_manifest(version_id: &str, versions_dir: &Path, json_path: &Path)
 
     println!("Found {} URL: {}", version_id, version_url);
 
-    let resp = client.get(&version_url).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&version_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-         return Err(format!("Failed to fetch version json: {}", resp.status()));
+        return Err(format!("Failed to fetch version json: {}", resp.status()));
     }
     let content = resp.text().await.map_err(|e| e.to_string())?;
 
-    fs::create_dir_all(versions_dir.join(version_id)).await.map_err(|e| e.to_string())?;
-    fs::write(json_path, &content).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(versions_dir.join(version_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    fs::write(json_path, &content)
+        .await
+        .map_err(|e| e.to_string())?;
 
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
@@ -389,13 +449,17 @@ async fn fetch_manifest(version_id: &str, versions_dir: &Path, json_path: &Path)
 async fn download_file(url: &str, path: &Path) -> Result<(), String> {
     println!("Downloading {} to {:?}", url, path);
     // Use reqwest async
-    let resp = reqwest::get(url).await.map_err(|e| format!("Failed to GET {}: {}", url, e))?;
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| format!("Failed to GET {}: {}", url, e))?;
     if !resp.status().is_success() {
         return Err(format!("Download failed: {}", resp.status()));
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    
-    fs::write(path, bytes).await.map_err(|e| format!("Write failed: {}", e))?;
+
+    fs::write(path, bytes)
+        .await
+        .map_err(|e| format!("Write failed: {}", e))?;
     Ok(())
 }
 

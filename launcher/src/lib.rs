@@ -121,7 +121,7 @@ impl VanillaLaunchConfig {
 
         cmd.arg("--uuid").arg(auth.uuid());
         cmd.arg("--accessToken").arg(auth.access_token());
-        
+
         // Legacy support (1.6.4 and older)
         // Format often expected: token:<access_token>:<uuid>
         // Or just the token. Let's try Generic legacy format.

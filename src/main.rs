@@ -1,16 +1,16 @@
 mod screens;
 use screens::{
     AccountMessage, AccountScreen, AccountUpdate, InstancesMessage, InstancesScreen,
-    JavaManagerMessage, JavaManagerScreen, LoadingScreen, ModpacksMessage, ModpacksScreen, PlayMessage,
-    PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
+    JavaManagerMessage, JavaManagerScreen, LoadingScreen, ModpacksMessage, ModpacksScreen,
+    PlayMessage, PlayScreen, ServerMessage, ServerScreen, SettingsMessage, SettingsScreen,
 };
 
 mod game;
 mod theme;
 use theme::{icon_from_path, menu_button};
 
-pub mod instance_manager;
 pub mod assets;
+pub mod instance_manager;
 
 use account_manager::AccountKind;
 use config_manager::FastmcConfig;
@@ -151,12 +151,16 @@ impl App {
                 match play_message {
                     PlayMessage::LaunchStarted => {
                         let active_account = self.account.active_account().cloned();
-                        
+
                         // We need the active instance ID from the play screen
                         let instance_id = if let Some(meta) = self.play.active_instance() {
-                             meta.id.clone()
+                            meta.id.clone()
                         } else {
-                             return iced::Task::done(Message::PlayScreen(PlayMessage::LaunchFinished(Err("No instance selected".to_string()))));
+                            return iced::Task::done(Message::PlayScreen(
+                                PlayMessage::LaunchFinished(
+                                    Err("No instance selected".to_string()),
+                                ),
+                            ));
                         };
 
                         if let Some(account) = active_account {
@@ -165,46 +169,60 @@ impl App {
                                 return iced::Task::none();
                             }
 
-                             // Reuse the launch logic from InstancesScreen essentially
-                             let active_account_store = self.account.clone_store();
+                            // Reuse the launch logic from InstancesScreen essentially
+                            let active_account_store = self.account.clone_store();
 
-                             iced::Task::perform(
+                            iced::Task::perform(
                                 async move {
                                     // 1. Get tokens
-                                    let access_token = if let AccountKind::Microsoft { .. } = &account.kind {
-                                        active_account_store.microsoft_tokens(&account.id)
-                                            .ok().flatten()
-                                            .map(|s| s.access_token)
-                                            .unwrap_or_default()
-                                    } else {
-                                        String::new()
-                                    };
+                                    let access_token =
+                                        if let AccountKind::Microsoft { .. } = &account.kind {
+                                            active_account_store
+                                                .microsoft_tokens(&account.id)
+                                                .ok()
+                                                .flatten()
+                                                .map(|s| s.access_token)
+                                                .unwrap_or_default()
+                                        } else {
+                                            String::new()
+                                        };
 
                                     // 2. Prepare Launch
                                     use directories::ProjectDirs;
-                                    let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
-                                    let instance_dir = dirs.data_local_dir().join("instances").join(&instance_id);
+                                    let dirs =
+                                        ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                    let instance_dir =
+                                        dirs.data_local_dir().join("instances").join(&instance_id);
                                     let game_dir = instance_dir.join(".minecraft");
                                     let json_path = instance_dir.join("instance.json");
-                                    
+
                                     // Load metadata
-                                    let content = tokio::fs::read_to_string(&json_path).await
-                                        .map_err(|e| format!("Failed to read instance config: {}", e))?;
-                                    let metadata: instance_manager::InstanceMetadata = serde_json::from_str(&content)
-                                        .map_err(|e| format!("Invalid instance config: {}", e))?;
+                                    let content =
+                                        tokio::fs::read_to_string(&json_path).await.map_err(
+                                            |e| format!("Failed to read instance config: {}", e),
+                                        )?;
+                                    let metadata: instance_manager::InstanceMetadata =
+                                        serde_json::from_str(&content).map_err(|e| {
+                                            format!("Invalid instance config: {}", e)
+                                        })?;
 
                                     // Detect Java
                                     let config = FastmcConfig::load().unwrap_or_default();
-                                    let java_settings = java_manager::JavaLaunchSettings::from(&config.java);
+                                    let java_settings =
+                                        java_manager::JavaLaunchSettings::from(&config.java);
                                     let java_config = java_settings.detection_config();
                                     // Select Java based on version
                                     let target_version = "1.0"; // Hardcoded for testing legacy launch
-                                    
-                                    let summary = tokio::task::spawn_blocking(move || {
-                                         java_manager::detect_installations(&java_config)
-                                    }).await.map_err(|e| e.to_string())?;
 
-                                    let java_path = summary.select_for_version(target_version).map_err(|e| e.to_string())?;
+                                    let summary = tokio::task::spawn_blocking(move || {
+                                        java_manager::detect_installations(&java_config)
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+
+                                    let java_path = summary
+                                        .select_for_version(target_version)
+                                        .map_err(|e| e.to_string())?;
 
                                     println!("Selected Java path: {:?}", java_path);
 
@@ -216,14 +234,19 @@ impl App {
                                         java_path,
                                         game_dir,
                                         target_version,
-                                    ).await?;
-                                    
-                                    let mut child = cmd.spawn().map_err(|e| format!("Failed to start process: {}", e))?;
-                                    
+                                    )
+                                    .await?;
+
+                                    let mut child = cmd
+                                        .spawn()
+                                        .map_err(|e| format!("Failed to start process: {}", e))?;
+
                                     // Wait for process to exit (blocking)
                                     tokio::task::spawn_blocking(move || {
                                         let _ = child.wait();
-                                    }).await.map_err(|e| e.to_string())?;
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
 
                                     Ok(())
                                 },
@@ -254,9 +277,13 @@ impl App {
                 if let InstancesMessage::LaunchInstance(instance_id) = &instances_message {
                     let id = instance_id.clone();
                     let active_account = self.account.clone_store();
-                    
+
                     if let Some(account_id) = active_account.active {
-                        let account = active_account.accounts.iter().find(|a| a.id == account_id).cloned();
+                        let account = active_account
+                            .accounts
+                            .iter()
+                            .find(|a| a.id == account_id)
+                            .cloned();
                         if let Some(account) = account {
                             if account.requires_login {
                                 self.stage = Stage::AccountSetup;
@@ -266,40 +293,53 @@ impl App {
                             return iced::Task::perform(
                                 async move {
                                     // 1. Get tokens (Async)
-                                    let access_token = if let AccountKind::Microsoft { .. } = &account.kind {
-                                        active_account.microsoft_tokens(&account.id)
-                                            .ok().flatten()
-                                            .map(|s| s.access_token)
-                                            .unwrap_or_default()
-                                    } else {
-                                        String::new()
-                                    };
+                                    let access_token =
+                                        if let AccountKind::Microsoft { .. } = &account.kind {
+                                            active_account
+                                                .microsoft_tokens(&account.id)
+                                                .ok()
+                                                .flatten()
+                                                .map(|s| s.access_token)
+                                                .unwrap_or_default()
+                                        } else {
+                                            String::new()
+                                        };
 
                                     // 2. Prepare Launch (Async)
                                     use directories::ProjectDirs;
-                                    let dirs = ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
-                                    let instance_dir = dirs.data_local_dir().join("instances").join(&id);
+                                    let dirs =
+                                        ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                    let instance_dir =
+                                        dirs.data_local_dir().join("instances").join(&id);
                                     let game_dir = instance_dir.join(".minecraft");
                                     let json_path = instance_dir.join("instance.json");
-                                    
+
                                     // Load metadata
-                                    let content = tokio::fs::read_to_string(&json_path).await
-                                        .map_err(|e| format!("Failed to read instance config: {}", e))?;
-                                    let metadata: instance_manager::InstanceMetadata = serde_json::from_str(&content)
-                                        .map_err(|e| format!("Invalid instance config: {}", e))?;
+                                    let content =
+                                        tokio::fs::read_to_string(&json_path).await.map_err(
+                                            |e| format!("Failed to read instance config: {}", e),
+                                        )?;
+                                    let metadata: instance_manager::InstanceMetadata =
+                                        serde_json::from_str(&content).map_err(|e| {
+                                            format!("Invalid instance config: {}", e)
+                                        })?;
 
                                     // Detect Java (Blocking, but fast-ish, can wrap if needed)
                                     let config = FastmcConfig::load().unwrap_or_default();
-                                    
-                                    // Use settings to drive detection (respects user preference)
-                                    let java_settings = java_manager::JavaLaunchSettings::from(&config.java);
-                                    let java_config = java_settings.detection_config();
-                                    
-                                    let summary = tokio::task::spawn_blocking(move || {
-                                         java_manager::detect_installations(&java_config)
-                                    }).await.map_err(|e| e.to_string())?;
 
-                                    let java_path = summary.select_for_version(&metadata.game_version)?;
+                                    // Use settings to drive detection (respects user preference)
+                                    let java_settings =
+                                        java_manager::JavaLaunchSettings::from(&config.java);
+                                    let java_config = java_settings.detection_config();
+
+                                    let summary = tokio::task::spawn_blocking(move || {
+                                        java_manager::detect_installations(&java_config)
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+
+                                    let java_path =
+                                        summary.select_for_version(&metadata.game_version)?;
 
                                     let mut cmd = game::prepare_and_launch(
                                         &account,
@@ -307,27 +347,40 @@ impl App {
                                         java_path,
                                         game_dir,
                                         &metadata.game_version,
-                                    ).await?;
+                                    )
+                                    .await?;
 
-                                    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn process: {}", e))?;
+                                    let mut child = cmd
+                                        .spawn()
+                                        .map_err(|e| format!("Failed to spawn process: {}", e))?;
 
                                     // Wait for process to exit
                                     tokio::task::spawn_blocking(move || {
                                         let _ = child.wait();
-                                    }).await.map_err(|e| e.to_string())?;
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
 
                                     Ok(())
                                 },
-                                |res| Message::InstancesScreen(InstancesMessage::LaunchFinished(res)),
+                                |res| {
+                                    Message::InstancesScreen(InstancesMessage::LaunchFinished(res))
+                                },
                             );
                         } else {
-                             return iced::Task::done(Message::InstancesScreen(InstancesMessage::LaunchFinished(Err("Active account not found".to_string()))));
+                            return iced::Task::done(Message::InstancesScreen(
+                                InstancesMessage::LaunchFinished(Err(
+                                    "Active account not found".to_string()
+                                )),
+                            ));
                         }
                     } else {
-                         return iced::Task::done(Message::InstancesScreen(InstancesMessage::LaunchFinished(Err("No active account".to_string()))));
+                        return iced::Task::done(Message::InstancesScreen(
+                            InstancesMessage::LaunchFinished(Err("No active account".to_string())),
+                        ));
                     }
-                 }
-            
+                }
+
                 let task = self.instances.update(instances_message);
                 task.map(Message::InstancesScreen)
             }
@@ -338,12 +391,12 @@ impl App {
             Message::MenuItemSelected(item) => {
                 self.stage = Stage::Main;
                 self.selected_menu = item;
-                
+
                 if item == MenuItem::Instances {
-                     let task = self.instances.refresh();
-                     return task.map(Message::InstancesScreen);
+                    let task = self.instances.refresh();
+                    return task.map(Message::InstancesScreen);
                 }
-                
+
                 iced::Task::none()
             }
             Message::AccountPressed => {
@@ -383,22 +436,20 @@ impl App {
                     Message::AccountValidated,
                 );
 
-                let assets_task = iced::Task::perform(
-                    assets::AssetStore::load(),
-                    Message::AssetsLoaded
-                );
+                let assets_task =
+                    iced::Task::perform(assets::AssetStore::load(), Message::AssetsLoaded);
 
                 iced::Task::batch(vec![refresh_task, validation_task, assets_task])
             }
             Message::AssetsLoaded(store) => {
-                 self.assets = Some(store);
-                 
-                 // If we already have a validation result, we can try to transition
-                 if let Some(result) = self.validation_result.clone() {
-                     return self.handle_startup_completion(result);
-                 }
-                 
-                 iced::Task::none()
+                self.assets = Some(store);
+
+                // If we already have a validation result, we can try to transition
+                if let Some(result) = self.validation_result.clone() {
+                    return self.handle_startup_completion(result);
+                }
+
+                iced::Task::none()
             }
             Message::AccountValidated(result) => {
                 self.validation_result = Some(result.clone());
@@ -407,7 +458,7 @@ impl App {
                 if self.assets.is_some() {
                     return self.handle_startup_completion(result);
                 }
-                
+
                 iced::Task::none()
             }
         }
@@ -453,7 +504,10 @@ impl App {
         let divider_color = iced::Color::from_rgb(0.18, 0.18, 0.21);
 
         let content = match self.selected_menu {
-            MenuItem::Play => self.play.view(self.assets.as_ref()).map(Message::PlayScreen),
+            MenuItem::Play => self
+                .play
+                .view(self.assets.as_ref())
+                .map(Message::PlayScreen),
             MenuItem::Server => self.server.view().map(Message::ServerScreen),
             MenuItem::Modpacks => self.modpacks.view().map(Message::ModpacksScreen),
             MenuItem::JavaManager => self.java_manager.view().map(Message::JavaManagerScreen),
@@ -492,19 +546,19 @@ impl App {
 
         let header: iced::Element<Message> = if let Some(store) = &self.assets {
             if let Some(handle) = store.get_image("wide_logo.png") {
-                 iced::widget::container(
+                iced::widget::container(
                     iced::widget::image(handle)
                         .width(iced::Length::Fill)
-                        .content_fit(iced::ContentFit::Contain)
-                 )
-                 .width(iced::Length::Fill)
-                 .align_x(iced::Alignment::Center)
-                 .into()
+                        .content_fit(iced::ContentFit::Contain),
+                )
+                .width(iced::Length::Fill)
+                .align_x(iced::Alignment::Center)
+                .into()
             } else {
-                 iced::widget::text("FastMC").size(24).into()
+                iced::widget::text("FastMC").size(24).into()
             }
         } else {
-             iced::widget::text("FastMC").size(24).into()
+            iced::widget::text("FastMC").size(24).into()
         };
 
         let top_divider = iced::widget::container(
@@ -526,17 +580,20 @@ impl App {
                 // We need to update icon_from_path to use store if possible.
                 // For now, let's just stick to the old way for a second, then refactor the helper.
                 // Actually, let's implement the store usage here.
-                
+
                 let icon = if let Some(store) = &self.assets {
                     // path is like "assets/svg/play.svg", we stored keys as "play.svg"
-                    let filename = std::path::Path::new(path).file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    let filename = std::path::Path::new(path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
                     if let Some(handle) = store.get_icon(filename) {
-                         iced::widget::svg(handle)
+                        iced::widget::svg(handle)
                             .width(iced::Length::Fixed(24.0))
                             .height(iced::Length::Fixed(24.0))
                             .into()
                     } else {
-                         icon_from_path::<Message>(path)
+                        icon_from_path::<Message>(path)
                     }
                 } else {
                     icon_from_path::<Message>(path)
@@ -697,7 +754,6 @@ impl App {
             .into()
     }
 }
-
 
 fn load_icon() -> Option<iced::window::Icon> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/favicon.png");

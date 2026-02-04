@@ -121,7 +121,7 @@ impl AccountService {
         let session = self.game.minecraft_session(&tokens).await?;
         self.store.upsert_microsoft(&session).await
     }
-    
+
     pub async fn refresh_account(&mut self, account_id: &Uuid) -> Result<&Account, AccountError> {
         let secrets = load_microsoft_tokens(account_id)?.ok_or_else(|| {
             AccountError::Auth(microsoft_auth::AuthError::OAuth(
@@ -129,7 +129,10 @@ impl AccountService {
             ))
         })?;
 
-        let tokens = self.auth.refresh_access_token(&secrets.refresh_token).await?;
+        let tokens = self
+            .auth
+            .refresh_access_token(&secrets.refresh_token)
+            .await?;
         let session = self.game.minecraft_session(&tokens).await?;
         self.store.upsert_microsoft(&session).await
     }
@@ -176,14 +179,12 @@ impl AccountService {
 
             // We update the store via refresh_account, then re-fetch reference
             match self.refresh_account(&active_id).await {
-                Ok(_) => {
-                     Ok(self
-                        .store
-                        .accounts
-                        .iter()
-                        .find(|a| a.id == active_id)
-                        .unwrap())
-                }
+                Ok(_) => Ok(self
+                    .store
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == active_id)
+                    .unwrap()),
                 Err(e) => {
                     // Mark as requiring login
                     if let Some(account) =
@@ -280,7 +281,11 @@ impl MicrosoftGameClient {
         Ok((response.token, uhs))
     }
 
-    async fn xsts_token(&self, xbl_token: &str, uhs: &str) -> Result<(String, String), AccountError> {
+    async fn xsts_token(
+        &self,
+        xbl_token: &str,
+        uhs: &str,
+    ) -> Result<(String, String), AccountError> {
         let payload = serde_json::json!({
             "Properties": {
                 "SandboxId": "RETAIL",
@@ -310,7 +315,11 @@ impl MicrosoftGameClient {
         Ok((response.token, user_hash))
     }
 
-    async fn minecraft_login(&self, uhs: &str, xsts_token: &str) -> Result<(String, u64), AccountError> {
+    async fn minecraft_login(
+        &self,
+        uhs: &str,
+        xsts_token: &str,
+    ) -> Result<(String, u64), AccountError> {
         let payload = serde_json::json!({
             "identityToken": format!("XBL3.0 x={};{}", uhs, xsts_token)
         });
@@ -328,7 +337,10 @@ impl MicrosoftGameClient {
         Ok((response.access_token, response.expires_in))
     }
 
-    async fn minecraft_profile(&self, minecraft_token: &str) -> Result<MinecraftProfile, AccountError> {
+    async fn minecraft_profile(
+        &self,
+        minecraft_token: &str,
+    ) -> Result<MinecraftProfile, AccountError> {
         let response = self
             .http
             .get("https://api.minecraftservices.com/minecraft/profile")

@@ -92,7 +92,7 @@ impl DetectionSummary {
         // 1.17 -> Java 16/17
         // 1.18+ -> Java 17+
         // 1.20.5+ -> Java 21+
-        
+
         // Basic parsing of target version to determine requirement
         let requires_java8 = target_version.starts_with("1.0") 
             || target_version.starts_with("1.1") 
@@ -105,19 +105,29 @@ impl DetectionSummary {
             || target_version == "1.8" // Beta/Alpha often aliased
             || (target_version.starts_with("1.") && target_version.split('.').nth(1).and_then(|s| s.parse::<i32>().ok()).map(|minor| minor <= 16).unwrap_or(false));
 
-        let requires_java17 = !requires_java8 && (
-            target_version.starts_with("1.17") || 
-            target_version.starts_with("1.18") || 
-            target_version.starts_with("1.19") ||
-            (target_version.starts_with("1.") && target_version.split('.').nth(1).and_then(|s| s.parse::<i32>().ok()).map(|minor| minor >= 17).unwrap_or(false))
-        );
-        
-        let requires_java21 = !requires_java8 && (
-             target_version.starts_with("1.20.5") ||
-             target_version.starts_with("1.20.6") ||
-             target_version.starts_with("1.21") ||
-             (target_version.starts_with("1.") && target_version.split('.').nth(1).and_then(|s| s.parse::<i32>().ok()).map(|minor| minor >= 21).unwrap_or(false))
-        );
+        let requires_java17 = !requires_java8
+            && (target_version.starts_with("1.17")
+                || target_version.starts_with("1.18")
+                || target_version.starts_with("1.19")
+                || (target_version.starts_with("1.")
+                    && target_version
+                        .split('.')
+                        .nth(1)
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .map(|minor| minor >= 17)
+                        .unwrap_or(false)));
+
+        let requires_java21 = !requires_java8
+            && (target_version.starts_with("1.20.5")
+                || target_version.starts_with("1.20.6")
+                || target_version.starts_with("1.21")
+                || (target_version.starts_with("1.")
+                    && target_version
+                        .split('.')
+                        .nth(1)
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .map(|minor| minor >= 21)
+                        .unwrap_or(false)));
 
         // Helper to check if a version string matches requirement
         let matches_req = |v: &str| {
@@ -128,31 +138,41 @@ impl DetectionSummary {
             } else if requires_java17 {
                 v.starts_with("17") || v.starts_with("16")
             } else {
-                 // Fallback for unknown newer versions
-                 v.starts_with("21")
+                // Fallback for unknown newer versions
+                v.starts_with("21")
             }
         };
 
         // Priority 1: User Provided Path
-        if let Some(user_install) = self.installations.iter().find(|i| matches!(i.source, InstallSource::UserProvided)) {
-             // Validate compatibility if version metadata is available
-             if let Some(v) = &user_install.version {
-                 if matches_req(v) {
-                     return Ok(user_install.path.clone());
-                 }
-                 // If it DOESN'T match, we fail immediately with a descriptive error.
-                 // This handles the case where user selected Java 21 for 1.8.
-                 return Err(format!(
-                     "Selected Java version ({}) is incompatible with Minecraft {}. Required: {}", 
-                     v, 
-                     target_version,
-                     if requires_java8 { "Java 8" } else if requires_java17 { "Java 16/17" } else { "Java 21+" }
-                 ));
-             }
-             
-             // If version inspection failed (None) but path is valid, we trust the user.
-             // Warning: this risks a ClassCastException if they chose wrong, but it's better than blocking a valid unrecognized JVM.
-             return Ok(user_install.path.clone());
+        if let Some(user_install) = self
+            .installations
+            .iter()
+            .find(|i| matches!(i.source, InstallSource::UserProvided))
+        {
+            // Validate compatibility if version metadata is available
+            if let Some(v) = &user_install.version {
+                if matches_req(v) {
+                    return Ok(user_install.path.clone());
+                }
+                // If it DOESN'T match, we fail immediately with a descriptive error.
+                // This handles the case where user selected Java 21 for 1.8.
+                return Err(format!(
+                    "Selected Java version ({}) is incompatible with Minecraft {}. Required: {}",
+                    v,
+                    target_version,
+                    if requires_java8 {
+                        "Java 8"
+                    } else if requires_java17 {
+                        "Java 16/17"
+                    } else {
+                        "Java 21+"
+                    }
+                ));
+            }
+
+            // If version inspection failed (None) but path is valid, we trust the user.
+            // Warning: this risks a ClassCastException if they chose wrong, but it's better than blocking a valid unrecognized JVM.
+            return Ok(user_install.path.clone());
         }
 
         // Priority 2: Best Auto-Detected Match
@@ -160,7 +180,7 @@ impl DetectionSummary {
             let v = i.version.as_deref().unwrap_or("");
             matches_req(v)
         });
-        
+
         if let Some(install) = best_match {
             return Ok(install.path.clone());
         }
@@ -168,32 +188,41 @@ impl DetectionSummary {
         // Fallbacks
         if requires_java8 {
             // Try to find ANY 8
-             if let Some(install) = self.installations.iter().find(|i| i.version.as_deref().map(|v| v.starts_with("1.8") || v.starts_with("8")).unwrap_or(false)) {
-                 return Ok(install.path.clone());
-             }
-             
-             // If user has a forced path and we found NO other match, maybe just try the user path?
-             if let Some(user_install) = self.installations.iter().find(|i| matches!(i.source, InstallSource::UserProvided)) {
-                 return Ok(user_install.path.clone());
-             }
+            if let Some(install) = self.installations.iter().find(|i| {
+                i.version
+                    .as_deref()
+                    .map(|v| v.starts_with("1.8") || v.starts_with("8"))
+                    .unwrap_or(false)
+            }) {
+                return Ok(install.path.clone());
+            }
 
-             // ERROR: Targeted legacy but no Java 8 found
-             return Err("Java 8 is required for this version. Please install it or configure a Java path in settings.".to_string());
+            // If user has a forced path and we found NO other match, maybe just try the user path?
+            if let Some(user_install) = self
+                .installations
+                .iter()
+                .find(|i| matches!(i.source, InstallSource::UserProvided))
+            {
+                return Ok(user_install.path.clone());
+            }
+
+            // ERROR: Targeted legacy but no Java 8 found
+            return Err("Java 8 is required for this version. Please install it or configure a Java path in settings.".to_string());
         }
-        
+
         // Final Fallback: use whatever looks newest or just the first one
-        Ok(self.installations.iter().max_by_key(|i| {
-             i.version
-                 .as_ref()
-                 .and_then(|v| {
-                     v.split(|c: char| !c.is_numeric())
-                         .next()
-                 })
-                 .and_then(|s| s.parse::<i32>().ok())
-                 .unwrap_or(0)
-         })
-         .map(|i| i.path.clone())
-         .unwrap_or_else(|| PathBuf::from("java")))
+        Ok(self
+            .installations
+            .iter()
+            .max_by_key(|i| {
+                i.version
+                    .as_ref()
+                    .and_then(|v| v.split(|c: char| !c.is_numeric()).next())
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(0)
+            })
+            .map(|i| i.path.clone())
+            .unwrap_or_else(|| PathBuf::from("java")))
     }
 }
 

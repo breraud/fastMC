@@ -52,7 +52,10 @@ impl MicrosoftAuthenticator {
             raw: response,
         })
     }
-    pub async fn poll_device_code(&self, code: &DeviceCodeInfo) -> Result<MicrosoftTokens, AuthError> {
+    pub async fn poll_device_code(
+        &self,
+        code: &DeviceCodeInfo,
+    ) -> Result<MicrosoftTokens, AuthError> {
         let token = self
             .client
             .exchange_device_access_token(&code.raw)
@@ -86,7 +89,10 @@ impl MicrosoftAuthenticator {
             expires_at: unix_timestamp_after(expires_in),
         })
     }
-    pub async fn refresh_access_token(&self, refresh_token: &str) -> Result<MicrosoftTokens, AuthError> {
+    pub async fn refresh_access_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<MicrosoftTokens, AuthError> {
         let token = self
             .client
             .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.to_string()))
