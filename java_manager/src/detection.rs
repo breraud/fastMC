@@ -94,40 +94,41 @@ impl DetectionSummary {
         // 1.20.5+ -> Java 21+
 
         // Basic parsing of target version to determine requirement
-        let requires_java8 = target_version.starts_with("1.0") 
-            || target_version.starts_with("1.1") 
-            || target_version.starts_with("1.2") 
-            || target_version.starts_with("1.3") 
-            || target_version.starts_with("1.4") 
-            || target_version.starts_with("1.5") 
-            || target_version.starts_with("1.6") 
-            || target_version.starts_with("1.7")
-            || target_version == "1.8" // Beta/Alpha often aliased
-            || (target_version.starts_with("1.") && target_version.split('.').nth(1).and_then(|s| s.parse::<i32>().ok()).map(|minor| minor <= 16).unwrap_or(false));
+        // Basic parsing of target version to determine requirement
+        let is_version_1_x = target_version.starts_with("1.");
+        let parts: Vec<&str> = if is_version_1_x {
+            target_version.split('.').collect()
+        } else {
+            Vec::new()
+        };
+        
+        let minor = if parts.len() >= 2 {
+            parts[1].parse::<i32>().unwrap_or(0)
+        } else {
+            0
+        };
+        
+        let patch = if parts.len() >= 3 {
+            // Strip any non-numeric suffixes from patch (e.g., "1.2.3-pre") 
+            parts[2].chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<i32>()
+                .unwrap_or(0)
+        } else {
+            0
+        };
 
-        let requires_java17 = !requires_java8
-            && (target_version.starts_with("1.17")
-                || target_version.starts_with("1.18")
-                || target_version.starts_with("1.19")
-                || (target_version.starts_with("1.")
-                    && target_version
-                        .split('.')
-                        .nth(1)
-                        .and_then(|s| s.parse::<i32>().ok())
-                        .map(|minor| minor >= 17)
-                        .unwrap_or(false)));
+        let requires_java21 = is_version_1_x 
+            && (minor >= 21 || (minor == 20 && patch >= 5));
 
-        let requires_java21 = !requires_java8
-            && (target_version.starts_with("1.20.5")
-                || target_version.starts_with("1.20.6")
-                || target_version.starts_with("1.21")
-                || (target_version.starts_with("1.")
-                    && target_version
-                        .split('.')
-                        .nth(1)
-                        .and_then(|s| s.parse::<i32>().ok())
-                        .map(|minor| minor >= 21)
-                        .unwrap_or(false)));
+        let requires_java17 = is_version_1_x 
+            && !requires_java21 
+            && minor >= 17;
+
+        let requires_java8 = is_version_1_x 
+            && !requires_java21 
+            && !requires_java17;
 
         // Helper to check if a version string matches requirement
         let matches_req = |v: &str| {

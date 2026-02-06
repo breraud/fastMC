@@ -212,8 +212,6 @@ impl App {
                                         java_manager::JavaLaunchSettings::from(&config.java);
                                     let java_config = java_settings.detection_config();
                                     // Select Java based on version
-                                    let target_version = "1.0"; // Hardcoded for testing legacy launch
-
                                     let summary = tokio::task::spawn_blocking(move || {
                                         java_manager::detect_installations(&java_config)
                                     })
@@ -221,7 +219,7 @@ impl App {
                                     .map_err(|e| e.to_string())?;
 
                                     let java_path = summary
-                                        .select_for_version(target_version)
+                                        .select_for_version(&metadata.game_version)
                                         .map_err(|e| e.to_string())?;
 
                                     println!("Selected Java path: {:?}", java_path);
