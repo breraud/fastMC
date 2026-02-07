@@ -18,6 +18,7 @@ pub enum Message {
     ToggleSnapshots(bool),
     LaunchInstance(String), // Instance ID
     LaunchFinished(Result<(), String>),
+    OpenJavaSettings(String, String), // (Instance ID, Instance Name)
 }
 
 pub struct InstancesScreen {
@@ -132,6 +133,7 @@ impl InstancesScreen {
                 }
             },
             Message::LaunchInstance(_) => Task::none(), // Handled by parent
+            Message::OpenJavaSettings(_, _) => Task::none(), // Handled by parent
             Message::LaunchFinished(result) => {
                 match result {
                     Ok(_) => {
@@ -255,6 +257,14 @@ impl InstancesScreen {
                             .color(Color::from_rgb(0.6, 0.6, 0.6))
                         ];
 
+                        let java_btn = button(text("Java").size(12))
+                            .on_press(Message::OpenJavaSettings(
+                                inst.id.clone(),
+                                inst.name.clone(),
+                            ))
+                            .padding([5, 10])
+                            .style(iced::widget::button::secondary);
+
                         let delete_btn = button(text("Delete").size(12))
                             .on_press(Message::DeleteInstance(inst.id.clone()))
                             .padding([5, 10])
@@ -269,6 +279,7 @@ impl InstancesScreen {
                             row![
                                 info,
                                 iced::widget::Space::new().width(Length::Fill),
+                                java_btn,
                                 launch_btn,
                                 delete_btn
                             ]

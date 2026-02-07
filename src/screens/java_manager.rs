@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use config_manager::{FastmcConfig, JavaInstallationRecord};
 use iced::widget::{
-    Space, button, column, container, row, scrollable, slider, text, text_editor, text_input,
+    Space, button, column, container, pick_list, row, scrollable, slider, text, text_editor,
+    text_input,
 };
 use iced::{Alignment, Color, Element, Length, Task};
 use java_manager::{
@@ -13,8 +14,36 @@ use java_manager::{
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+use crate::instance_manager::{InstanceManager, InstanceMetadata};
+
 const MIN_MEMORY_BOUND: u32 = 512;
 const MAX_MEMORY_BOUND: u32 = 16384;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum JavaTarget {
+    Global,
+    Instance(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetOption {
+    pub target: JavaTarget,
+    pub display_name: String,
+}
+
+impl std::fmt::Display for TargetOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum OverrideField {
+    JavaPath,
+    MinMemory,
+    MaxMemory,
+    JvmArgs,
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -34,6 +63,11 @@ pub enum Message {
     BrowseForJava,
     BrowseFinished(Option<PathBuf>),
     UseCustomPath,
+    // Instance-awareness messages
+    TargetSelected(TargetOption),
+    InstancesLoaded(Vec<InstanceMetadata>),
+    ScopeToInstance(String, String),
+    ClearOverride(OverrideField),
 }
 
 pub struct JavaManagerScreen {
@@ -46,6 +80,12 @@ pub struct JavaManagerScreen {
     show_custom_form: bool,
     is_wide: bool,
     status: Option<(String, Color, Instant)>,
+    // Instance-awareness
+    target: JavaTarget,
+    available_targets: Vec<TargetOption>,
+    global_settings: JavaLaunchSettings,
+    instance_metadata: Option<InstanceMetadata>,
+    instance_manager: InstanceManager,
 }
 
 impl Default for JavaManagerScreen {
@@ -58,6 +98,7 @@ impl JavaManagerScreen {
     pub fn new() -> Self {
         let config = FastmcConfig::load().unwrap_or_default();
         let settings = JavaLaunchSettings::from(&config.java);
+        let global_settings = settings.clone();
         let args_input = settings.extra_jvm_args.join(" ");
         let args_content = text_editor::Content::with_text(&args_input);
         let custom_path_input = settings
@@ -66,7 +107,13 @@ impl JavaManagerScreen {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
 
+        let instance_manager = InstanceManager::new();
         let mut installations = map_records_to_installations(&settings.detected_installations);
+
+        let available_targets = vec![TargetOption {
+            target: JavaTarget::Global,
+            display_name: "Global (Default)".to_string(),
+        }];
 
         let mut screen = Self {
             installations: Vec::new(),
@@ -78,10 +125,193 @@ impl JavaManagerScreen {
             show_custom_form: false,
             is_wide: false,
             status: None,
+            target: JavaTarget::Global,
+            available_targets,
+            global_settings,
+            instance_metadata: None,
+            instance_manager,
         };
         screen.installations.append(&mut installations);
         screen.ensure_selected_entry();
         screen
+    }
+
+    fn load_for_target(&mut self) {
+        let config = FastmcConfig::load().unwrap_or_default();
+        self.global_settings = JavaLaunchSettings::from(&config.java);
+
+        match &self.target {
+            JavaTarget::Global => {
+                self.settings = self.global_settings.clone();
+                self.instance_metadata = None;
+                self.installations =
+                    map_records_to_installations(&self.settings.detected_installations);
+                self.ensure_selected_entry();
+            }
+            JavaTarget::Instance(id) => {
+                if let Ok(meta) = self.instance_manager.load_instance(id) {
+                    self.settings = JavaLaunchSettings {
+                        java_path: meta
+                            .java_path
+                            .as_ref()
+                            .map(PathBuf::from)
+                            .or_else(|| self.global_settings.java_path.clone()),
+                        auto_discover: meta
+                            .auto_discover
+                            .unwrap_or(self.global_settings.auto_discover),
+                        min_memory_mb: meta
+                            .min_memory_mb
+                            .unwrap_or(self.global_settings.min_memory_mb),
+                        max_memory_mb: meta
+                            .max_memory_mb
+                            .unwrap_or(self.global_settings.max_memory_mb),
+                        extra_jvm_args: meta
+                            .jvm_args
+                            .clone()
+                            .unwrap_or_else(|| self.global_settings.extra_jvm_args.clone()),
+                        detected_installations: self
+                            .global_settings
+                            .detected_installations
+                            .clone(),
+                    };
+                    self.instance_metadata = Some(meta);
+                    self.installations =
+                        map_records_to_installations(&self.settings.detected_installations);
+                    self.ensure_selected_entry();
+                }
+            }
+        }
+
+        let args_input = self.settings.extra_jvm_args.join(" ");
+        self.args_content = text_editor::Content::with_text(&args_input);
+        self.custom_path_input = self
+            .settings
+            .java_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+    }
+
+    fn rebuild_target_options(&mut self, instances: &[InstanceMetadata]) {
+        let mut options = vec![TargetOption {
+            target: JavaTarget::Global,
+            display_name: "Global (Default)".to_string(),
+        }];
+        for inst in instances {
+            options.push(TargetOption {
+                target: JavaTarget::Instance(inst.id.clone()),
+                display_name: format!("{} ({})", inst.name, inst.game_version),
+            });
+        }
+        self.available_targets = options;
+    }
+
+    fn current_target_option(&self) -> TargetOption {
+        self.available_targets
+            .iter()
+            .find(|opt| opt.target == self.target)
+            .cloned()
+            .unwrap_or(TargetOption {
+                target: JavaTarget::Global,
+                display_name: "Global (Default)".to_string(),
+            })
+    }
+
+    fn is_field_overridden(&self, field: &OverrideField) -> bool {
+        if matches!(self.target, JavaTarget::Global) {
+            return false;
+        }
+        match (&self.instance_metadata, field) {
+            (Some(meta), OverrideField::JavaPath) => meta.java_path.is_some(),
+            (Some(meta), OverrideField::MinMemory) => meta.min_memory_mb.is_some(),
+            (Some(meta), OverrideField::MaxMemory) => meta.max_memory_mb.is_some(),
+            (Some(meta), OverrideField::JvmArgs) => meta.jvm_args.is_some(),
+            _ => false,
+        }
+    }
+
+    fn mark_field_overridden(&mut self, field: &OverrideField) {
+        if let Some(meta) = &mut self.instance_metadata {
+            match field {
+                OverrideField::JavaPath => {
+                    meta.java_path = self
+                        .settings
+                        .java_path
+                        .as_ref()
+                        .map(|p| p.to_string_lossy().into_owned());
+                }
+                OverrideField::MinMemory => {
+                    meta.min_memory_mb = Some(self.settings.min_memory_mb);
+                }
+                OverrideField::MaxMemory => {
+                    meta.max_memory_mb = Some(self.settings.max_memory_mb);
+                }
+                OverrideField::JvmArgs => {
+                    meta.jvm_args = Some(self.settings.extra_jvm_args.clone());
+                }
+            }
+        }
+    }
+
+    fn inherited_indicator<'a>(
+        &self,
+        field: OverrideField,
+        is_overridden: bool,
+    ) -> Element<'a, Message> {
+        if matches!(self.target, JavaTarget::Global) {
+            return Space::new().into();
+        }
+
+        if is_overridden {
+            button(
+                text("Reset to default")
+                    .size(11)
+                    .style(move |_| iced::widget::text::Style {
+                        color: Some(Color::from_rgb(0.96, 0.47, 0.47)),
+                    }),
+            )
+            .padding([4, 8])
+            .style(move |_theme, status| {
+                let base = Color::from_rgb(0.24, 0.12, 0.12);
+                let hover = Color::from_rgb(0.28, 0.14, 0.14);
+                iced::widget::button::Style {
+                    background: Some(
+                        match status {
+                            iced::widget::button::Status::Hovered
+                            | iced::widget::button::Status::Pressed => hover,
+                            _ => base,
+                        }
+                        .into(),
+                    ),
+                    text_color: Color::from_rgb(0.96, 0.47, 0.47),
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        ..iced::Border::default()
+                    },
+                    ..iced::widget::button::Style::default()
+                }
+            })
+            .on_press(Message::ClearOverride(field))
+            .into()
+        } else {
+            container(
+                text("Inherited")
+                    .size(11)
+                    .style(move |_| iced::widget::text::Style {
+                        color: Some(Color::from_rgb(0.50, 0.50, 0.55)),
+                    }),
+            )
+            .padding([4, 8])
+            .style(move |_| iced::widget::container::Style {
+                background: Some(Color::from_rgb(0.16, 0.16, 0.19).into()),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    ..iced::Border::default()
+                },
+                ..iced::widget::container::Style::default()
+            })
+            .into()
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -92,12 +322,55 @@ impl JavaManagerScreen {
         let surface = Color::from_rgb(0.14, 0.14, 0.17);
         let surface_subtle = Color::from_rgb(0.10, 0.10, 0.12);
 
+        let heading_text = match &self.target {
+            JavaTarget::Global => "Java Runtime Manager".to_string(),
+            JavaTarget::Instance(_) => {
+                let name = self
+                    .instance_metadata
+                    .as_ref()
+                    .map(|m| m.name.as_str())
+                    .unwrap_or("Instance");
+                format!("Java Settings — {}", name)
+            }
+        };
+
         let heading =
-            text("Java Runtime Manager")
+            text(heading_text)
                 .size(28)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_primary),
                 });
+
+        // Target selector
+        let target_picker = pick_list(
+            std::borrow::Cow::Owned(self.available_targets.clone()),
+            Some(self.current_target_option()),
+            Message::TargetSelected,
+        )
+        .width(Length::Fixed(300.0));
+
+        let target_section = container(
+            row![
+                text("Configuring:")
+                    .size(16)
+                    .style(move |_| iced::widget::text::Style {
+                        color: Some(text_primary),
+                    }),
+                target_picker,
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .padding([10, 14])
+        .width(Length::Fill)
+        .style(move |_| iced::widget::container::Style {
+            background: Some(surface.into()),
+            border: iced::Border {
+                radius: 10.0.into(),
+                ..iced::Border::default()
+            },
+            ..iced::widget::container::Style::default()
+        });
 
         let status_banner = self.status.as_ref().map(|(msg, tone, _)| {
             container(
@@ -122,14 +395,20 @@ impl JavaManagerScreen {
             })
         });
 
+        let info_text = if matches!(self.target, JavaTarget::Global) {
+            "Configure the default Java runtime and memory settings for all instances."
+        } else {
+            "Override Java settings for this instance. Inherited values use global defaults."
+        };
+
         let info = container(
             column![
-                text("Each profile can use different Java and memory settings")
+                text("Java Configuration")
                     .size(16)
                     .style(move |_| iced::widget::text::Style {
                         color: Some(text_primary),
                     }),
-                text("Configure the optimal Java runtime for the launcher based on your needs.")
+                text(info_text)
                     .size(14)
                     .style(move |_| iced::widget::text::Style {
                         color: Some(text_muted),
@@ -218,21 +497,29 @@ impl JavaManagerScreen {
             .spacing(12)
             .align_y(Alignment::Center);
 
-        let title =
+        let java_path_overridden = self.is_field_overridden(&OverrideField::JavaPath);
+        let java_path_indicator = self.inherited_indicator(OverrideField::JavaPath, java_path_overridden);
+
+        let title_row: Element<'_, Message> = row![
             text("Select Java for launcher")
                 .size(20)
                 .style(move |_| iced::widget::text::Style {
                     color: Some(text_primary),
-                });
+                }),
+            java_path_indicator,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into();
 
         let install_header: Element<'_, Message> = if self.is_wide {
-            row![title, Space::new().width(Length::Fill), actions]
+            row![title_row, Space::new().width(Length::Fill), actions]
                 .spacing(12)
                 .align_y(Alignment::Center)
                 .width(Length::Fill)
                 .into()
         } else {
-            column![title, actions]
+            column![title_row, actions]
                 .spacing(10)
                 .align_x(Alignment::Start)
                 .width(Length::Fill)
@@ -454,6 +741,22 @@ impl JavaManagerScreen {
         };
 
         let (min_mem, max_mem) = (self.settings.min_memory_mb, self.settings.max_memory_mb);
+        let min_mem_overridden = self.is_field_overridden(&OverrideField::MinMemory);
+        let max_mem_overridden = self.is_field_overridden(&OverrideField::MaxMemory);
+        let min_mem_indicator = self.inherited_indicator(OverrideField::MinMemory, min_mem_overridden);
+        let max_mem_indicator = self.inherited_indicator(OverrideField::MaxMemory, max_mem_overridden);
+
+        let min_label_color = if !matches!(self.target, JavaTarget::Global) && !min_mem_overridden {
+            text_muted
+        } else {
+            text_primary
+        };
+        let max_label_color = if !matches!(self.target, JavaTarget::Global) && !max_mem_overridden {
+            text_muted
+        } else {
+            text_primary
+        };
+
         let memory_controls = container(
             column![
                 text("Memory Allocation")
@@ -471,11 +774,13 @@ impl JavaManagerScreen {
                     row![
                         text(format!("Minimum Memory (RAM): {} MB", min_mem)).style(move |_| {
                             iced::widget::text::Style {
-                                color: Some(text_primary),
+                                color: Some(min_label_color),
                             }
                         }),
+                        min_mem_indicator,
                         Space::new().width(Length::Fill)
                     ]
+                    .spacing(8)
                     .align_y(Alignment::Center),
                     slider(
                         MIN_MEMORY_BOUND as f32..=MAX_MEMORY_BOUND as f32,
@@ -486,11 +791,13 @@ impl JavaManagerScreen {
                     row![
                         text(format!("Maximum Memory (RAM): {} MB", max_mem)).style(move |_| {
                             iced::widget::text::Style {
-                                color: Some(text_primary),
+                                color: Some(max_label_color),
                             }
                         }),
+                        max_mem_indicator,
                         Space::new().width(Length::Fill)
                     ]
+                    .spacing(8)
                     .align_y(Alignment::Center),
                     slider(
                         MIN_MEMORY_BOUND as f32..=MAX_MEMORY_BOUND as f32,
@@ -552,13 +859,28 @@ impl JavaManagerScreen {
         })
         .on_press(Message::SaveArgs);
 
+        let jvm_args_overridden = self.is_field_overridden(&OverrideField::JvmArgs);
+        let jvm_args_indicator = self.inherited_indicator(OverrideField::JvmArgs, jvm_args_overridden);
+
+        let args_title_color = if !matches!(self.target, JavaTarget::Global) && !jvm_args_overridden
+        {
+            text_muted
+        } else {
+            text_primary
+        };
+
         let args_section = container(
             column![
-                text("Advanced JVM Arguments")
-                    .size(20)
-                    .style(move |_| iced::widget::text::Style {
-                        color: Some(text_primary),
-                    }),
+                row![
+                    text("Advanced JVM Arguments")
+                        .size(20)
+                        .style(move |_| iced::widget::text::Style {
+                            color: Some(args_title_color),
+                        }),
+                    jvm_args_indicator,
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
                 text("Custom Java arguments for advanced users. Use with caution.")
                     .size(14)
                     .style(move |_| iced::widget::text::Style {
@@ -582,6 +904,7 @@ impl JavaManagerScreen {
 
         let layout = column![
             heading,
+            target_section,
             info,
             container(column![install_header, installations, custom_path].spacing(10))
                 .padding(14)
@@ -677,6 +1000,57 @@ impl JavaManagerScreen {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::TargetSelected(option) => {
+                self.target = option.target;
+                self.load_for_target();
+                Task::none()
+            }
+            Message::ScopeToInstance(id, _name) => {
+                self.target = JavaTarget::Instance(id);
+                let instances = self.instance_manager.list_instances();
+                self.rebuild_target_options(&instances);
+                self.load_for_target();
+                Task::none()
+            }
+            Message::InstancesLoaded(instances) => {
+                self.rebuild_target_options(&instances);
+                Task::none()
+            }
+            Message::ClearOverride(field) => {
+                if let Some(meta) = &mut self.instance_metadata {
+                    match field {
+                        OverrideField::MinMemory => {
+                            meta.min_memory_mb = None;
+                            self.settings.min_memory_mb = self.global_settings.min_memory_mb;
+                        }
+                        OverrideField::MaxMemory => {
+                            meta.max_memory_mb = None;
+                            self.settings.max_memory_mb = self.global_settings.max_memory_mb;
+                        }
+                        OverrideField::JavaPath => {
+                            meta.java_path = None;
+                            self.settings.java_path = self.global_settings.java_path.clone();
+                            self.custom_path_input = self
+                                .settings
+                                .java_path
+                                .as_ref()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_default();
+                        }
+                        OverrideField::JvmArgs => {
+                            meta.jvm_args = None;
+                            self.settings.extra_jvm_args =
+                                self.global_settings.extra_jvm_args.clone();
+                            self.args_content = text_editor::Content::with_text(
+                                &self.settings.extra_jvm_args.join(" "),
+                            );
+                        }
+                    }
+                    self.persist_settings("Override cleared — using global default")
+                } else {
+                    Task::none()
+                }
+            }
             Message::DetectJava => {
                 self.detection_in_progress = true;
                 self.detection_errors.clear();
@@ -730,7 +1104,6 @@ impl JavaManagerScreen {
                         .iter_mut()
                         .find(|inst| normalize_path(&inst.path) == normalized)
                     {
-                        // If detection found the same path, keep the user-provided source and id.
                         existing.source = InstallSource::UserProvided;
                         existing.id = custom.id;
                         if existing.version.is_none() {
@@ -756,6 +1129,9 @@ impl JavaManagerScreen {
                 if let Some(install) = self.installations.iter().find(|inst| inst.id == id) {
                     self.settings.java_path = Some(install.path.clone());
                     self.custom_path_input = install.path.display().to_string();
+                    if matches!(self.target, JavaTarget::Instance(_)) {
+                        self.mark_field_overridden(&OverrideField::JavaPath);
+                    }
                     return self.persist_settings("Java selection saved");
                 }
                 Task::none()
@@ -788,22 +1164,34 @@ impl JavaManagerScreen {
                 let mut min = clamp_memory_value(value);
                 if min > self.settings.max_memory_mb {
                     self.settings.max_memory_mb = min;
+                    if matches!(self.target, JavaTarget::Instance(_)) {
+                        self.mark_field_overridden(&OverrideField::MaxMemory);
+                    }
                 }
                 if min < MIN_MEMORY_BOUND {
                     min = MIN_MEMORY_BOUND;
                 }
                 self.settings.min_memory_mb = min;
+                if matches!(self.target, JavaTarget::Instance(_)) {
+                    self.mark_field_overridden(&OverrideField::MinMemory);
+                }
                 self.persist_settings("Memory settings updated")
             }
             Message::MaxMemoryChanged(value) => {
                 let mut max = clamp_memory_value(value);
                 if max < self.settings.min_memory_mb {
                     self.settings.min_memory_mb = max;
+                    if matches!(self.target, JavaTarget::Instance(_)) {
+                        self.mark_field_overridden(&OverrideField::MinMemory);
+                    }
                 }
                 if max > MAX_MEMORY_BOUND {
                     max = MAX_MEMORY_BOUND;
                 }
                 self.settings.max_memory_mb = max;
+                if matches!(self.target, JavaTarget::Instance(_)) {
+                    self.mark_field_overridden(&OverrideField::MaxMemory);
+                }
                 self.persist_settings("Memory settings updated")
             }
             Message::ExtraArgsEdited(action) => {
@@ -820,6 +1208,9 @@ impl JavaManagerScreen {
                     .map(|p| p.display().to_string())
                     .unwrap_or_default();
                 self.sync_detected_records();
+                if matches!(self.target, JavaTarget::Instance(_)) {
+                    self.mark_field_overridden(&OverrideField::JvmArgs);
+                }
                 self.persist_settings("JVM arguments saved")
             }
             Message::CustomPathChanged(input) => {
@@ -835,6 +1226,9 @@ impl JavaManagerScreen {
                     self.custom_path_input = path.display().to_string();
                     self.settings.java_path = Some(path.clone());
                     self.ensure_selected_entry();
+                    if matches!(self.target, JavaTarget::Instance(_)) {
+                        self.mark_field_overridden(&OverrideField::JavaPath);
+                    }
                     let status = self.persist_settings("Custom Java selected");
                     let cfg = JavaDetectionConfig {
                         auto_discover: false,
@@ -854,6 +1248,9 @@ impl JavaManagerScreen {
                 if !self.custom_path_input.trim().is_empty() {
                     self.settings.java_path = Some(path);
                     self.ensure_selected_entry();
+                    if matches!(self.target, JavaTarget::Instance(_)) {
+                        self.mark_field_overridden(&OverrideField::JavaPath);
+                    }
                     let status = self.persist_settings("Custom Java selected");
                     let cfg = JavaDetectionConfig {
                         auto_discover: false,
@@ -1114,10 +1511,23 @@ impl JavaManagerScreen {
         }
     }
 
-    fn save_settings(&self) -> Result<(), String> {
-        let mut config = FastmcConfig::load().map_err(|e| e.to_string())?;
-        config.java = self.settings.to_config();
-        config.save().map_err(|e| e.to_string())
+    fn save_settings(&mut self) -> Result<(), String> {
+        match &self.target {
+            JavaTarget::Global => {
+                let mut config = FastmcConfig::load().map_err(|e| e.to_string())?;
+                config.java = self.settings.to_config();
+                config.save().map_err(|e| e.to_string())
+            }
+            JavaTarget::Instance(_) => {
+                if let Some(meta) = &self.instance_metadata {
+                    self.instance_manager
+                        .save_instance(meta)
+                        .map_err(|e| e.to_string())
+                } else {
+                    Err("No instance metadata loaded".to_string())
+                }
+            }
+        }
     }
 
     fn push_status(&mut self, message: &str, tone: Color) -> Task<Message> {

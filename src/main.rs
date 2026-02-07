@@ -201,10 +201,11 @@ impl App {
                                         tokio::fs::read_to_string(&json_path).await.map_err(
                                             |e| format!("Failed to read instance config: {}", e),
                                         )?;
-                                    let metadata: instance_manager::InstanceMetadata =
+                                    let mut metadata: instance_manager::InstanceMetadata =
                                         serde_json::from_str(&content).map_err(|e| {
                                             format!("Invalid instance config: {}", e)
                                         })?;
+                                    metadata.migrate();
 
                                     // Detect Java
                                     let config = FastmcConfig::load().unwrap_or_default();
@@ -272,6 +273,14 @@ impl App {
                 task.map(Message::JavaManagerScreen)
             }
             Message::InstancesScreen(instances_message) => {
+                if let InstancesMessage::OpenJavaSettings(id, name) = &instances_message {
+                    self.selected_menu = MenuItem::JavaManager;
+                    let task = self.java_manager.update(
+                        JavaManagerMessage::ScopeToInstance(id.clone(), name.clone()),
+                    );
+                    return task.map(Message::JavaManagerScreen);
+                }
+
                 if let InstancesMessage::LaunchInstance(instance_id) = &instances_message {
                     let id = instance_id.clone();
                     let active_account = self.account.clone_store();
@@ -317,10 +326,11 @@ impl App {
                                         tokio::fs::read_to_string(&json_path).await.map_err(
                                             |e| format!("Failed to read instance config: {}", e),
                                         )?;
-                                    let metadata: instance_manager::InstanceMetadata =
+                                    let mut metadata: instance_manager::InstanceMetadata =
                                         serde_json::from_str(&content).map_err(|e| {
                                             format!("Invalid instance config: {}", e)
                                         })?;
+                                    metadata.migrate();
 
                                     // Detect Java (Blocking, but fast-ish, can wrap if needed)
                                     let config = FastmcConfig::load().unwrap_or_default();
@@ -393,6 +403,15 @@ impl App {
                 if item == MenuItem::Instances {
                     let task = self.instances.refresh();
                     return task.map(Message::InstancesScreen);
+                }
+
+                if item == MenuItem::JavaManager {
+                    let manager = crate::instance_manager::InstanceManager::new();
+                    let instances = manager.list_instances();
+                    let task = self
+                        .java_manager
+                        .update(JavaManagerMessage::InstancesLoaded(instances));
+                    return task.map(Message::JavaManagerScreen);
                 }
 
                 iced::Task::none()

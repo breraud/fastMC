@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -27,10 +28,33 @@ pub struct InstanceMetadata {
     pub loader: ModLoader,
     pub loader_version: Option<String>,
 
-    // Java Overrides
+    // Java Overrides (None = inherit from global)
     pub java_path: Option<String>,
-    pub memory_mb: Option<u32>,
+    #[serde(default)]
+    pub min_memory_mb: Option<u32>,
+    #[serde(default)]
+    pub max_memory_mb: Option<u32>,
     pub jvm_args: Option<Vec<String>>,
+    #[serde(default)]
+    pub auto_discover: Option<bool>,
+
+    // Legacy field: read but never written back
+    #[serde(default, skip_serializing)]
+    memory_mb: Option<u32>,
+}
+
+impl InstanceMetadata {
+    /// Migrate legacy fields to new format.
+    pub fn migrate(&mut self) {
+        if let Some(mem) = self.memory_mb.take() {
+            if self.min_memory_mb.is_none() {
+                self.min_memory_mb = Some(mem);
+            }
+            if self.max_memory_mb.is_none() {
+                self.max_memory_mb = Some(mem);
+            }
+        }
+    }
 }
 
 impl Default for InstanceMetadata {
@@ -46,8 +70,11 @@ impl Default for InstanceMetadata {
             loader: ModLoader::Vanilla,
             loader_version: None,
             java_path: None,
-            memory_mb: None,
+            min_memory_mb: None,
+            max_memory_mb: None,
             jvm_args: None,
+            auto_discover: None,
+            memory_mb: None,
         }
     }
 }
@@ -87,7 +114,10 @@ impl InstanceManager {
                     let json_path = entry.path().join("instance.json");
                     if json_path.exists() {
                         if let Ok(content) = fs::read_to_string(&json_path) {
-                            if let Ok(meta) = serde_json::from_str::<InstanceMetadata>(&content) {
+                            if let Ok(mut meta) =
+                                serde_json::from_str::<InstanceMetadata>(&content)
+                            {
+                                meta.migrate();
                                 instances.push(meta);
                             }
                         }
@@ -138,5 +168,21 @@ impl InstanceManager {
             fs::remove_dir_all(instance_dir)?;
         }
         Ok(())
+    }
+
+    pub fn save_instance(&self, metadata: &InstanceMetadata) -> io::Result<()> {
+        let instance_dir = self.base_dir.join(&metadata.id);
+        let json = serde_json::to_string_pretty(metadata)?;
+        fs::write(instance_dir.join("instance.json"), json)?;
+        Ok(())
+    }
+
+    pub fn load_instance(&self, id: &str) -> io::Result<InstanceMetadata> {
+        let json_path = self.base_dir.join(id).join("instance.json");
+        let content = fs::read_to_string(&json_path)?;
+        let mut meta: InstanceMetadata = serde_json::from_str(&content)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        meta.migrate();
+        Ok(meta)
     }
 }
