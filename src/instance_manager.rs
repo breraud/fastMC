@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -13,6 +14,26 @@ pub enum ModLoader {
     NeoForge,
     Quilt,
 }
+
+impl fmt::Display for ModLoader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModLoader::Vanilla => write!(f, "Vanilla"),
+            ModLoader::Fabric => write!(f, "Fabric"),
+            ModLoader::Forge => write!(f, "Forge"),
+            ModLoader::NeoForge => write!(f, "NeoForge"),
+            ModLoader::Quilt => write!(f, "Quilt"),
+        }
+    }
+}
+
+pub const ALL_LOADERS: [ModLoader; 5] = [
+    ModLoader::Vanilla,
+    ModLoader::Fabric,
+    ModLoader::Quilt,
+    ModLoader::Forge,
+    ModLoader::NeoForge,
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceMetadata {
@@ -37,6 +58,9 @@ pub struct InstanceMetadata {
     pub jvm_args: Option<Vec<String>>,
     #[serde(default)]
     pub auto_discover: Option<bool>,
+
+    #[serde(default)]
+    pub loader_installed: bool,
 
     // Legacy field: read but never written back
     #[serde(default, skip_serializing)]
@@ -74,6 +98,7 @@ impl Default for InstanceMetadata {
             max_memory_mb: None,
             jvm_args: None,
             auto_discover: None,
+            loader_installed: false,
             memory_mb: None,
         }
     }

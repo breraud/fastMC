@@ -356,12 +356,53 @@ pub async fn prepare_and_launch(
         assets_dir.clone()
     };
 
+    // Check for loader profile (written by loader_installer)
+    let loader_profile_path = game_dir
+        .parent()
+        .unwrap_or(&game_dir)
+        .join("loader_profile.json");
+
+    let mut main_class = version_data.main_class;
+    let mut extra_jvm_args = vec![];
+    let mut extra_game_args = vec![];
+
+    if loader_profile_path.exists() {
+        let profile_content = fs::read_to_string(&loader_profile_path)
+            .await
+            .map_err(|e| format!("Failed to read loader profile: {}", e))?;
+        if let Ok(profile) =
+            serde_json::from_str::<version_manager::LoaderProfile>(&profile_content)
+        {
+            println!("Using loader profile: main_class={}", profile.main_class);
+            main_class = profile.main_class;
+
+            // Prepend loader libraries to classpath (loader libs go first)
+            let mut loader_classpath = Vec::new();
+            for lib in &profile.libraries {
+                let lib_path = libraries_dir.join(maven_to_path(&lib.name));
+                if lib_path.exists() {
+                    loader_classpath.push(lib_path);
+                } else {
+                    println!(
+                        "Warning: loader library not found: {}",
+                        lib_path.display()
+                    );
+                }
+            }
+            loader_classpath.append(&mut classpath);
+            classpath = loader_classpath;
+
+            extra_jvm_args = profile.jvm_args;
+            extra_game_args = profile.game_args;
+        }
+    }
+
     let config = VanillaLaunchConfig {
         java_path,
         game_dir: game_dir.clone(),
         assets_dir: launch_assets_dir,
         classpath,
-        main_class: version_data.main_class,
+        main_class,
         version_name: version_id.to_string(),
         asset_index: Some(version_data.asset_index.id),
         resolution: Some(Resolution {
@@ -372,8 +413,8 @@ pub async fn prepare_and_launch(
             min_megabytes: 1024,
             max_megabytes: 4096,
         }),
-        extra_jvm_args: vec![],
-        extra_game_args: vec![],
+        extra_jvm_args,
+        extra_game_args,
         natives_dir: Some(natives_dir),
     };
 
@@ -446,7 +487,7 @@ async fn fetch_manifest(
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
-async fn download_file(url: &str, path: &Path) -> Result<(), String> {
+pub async fn download_file(url: &str, path: &Path) -> Result<(), String> {
     println!("Downloading {} to {:?}", url, path);
     // Use reqwest async
     let resp = reqwest::get(url)
@@ -463,7 +504,7 @@ async fn download_file(url: &str, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn maven_to_path(maven_id: &str) -> PathBuf {
+pub fn maven_to_path(maven_id: &str) -> PathBuf {
     let parts: Vec<&str> = maven_id.split(':').collect();
     let domain = parts[0].replace('.', "/");
     let name = parts[1];

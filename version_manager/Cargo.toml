@@ -10,3 +10,4 @@ serde_json = "1.0"
 thiserror = "1.0"
 url = "2.4"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] } # Needed for tests if we want to run them
+zip = "0.6"

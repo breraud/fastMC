@@ -5655,6 +5655,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "url",
+ "zip",
 ]
 
 [[package]]

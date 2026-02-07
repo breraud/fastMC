@@ -6,6 +6,7 @@ use screens::{
 };
 
 mod game;
+mod loader_installer;
 mod theme;
 use theme::{icon_from_path, menu_button};
 
@@ -279,6 +280,91 @@ impl App {
                         JavaManagerMessage::ScopeToInstance(id.clone(), name.clone()),
                     );
                     return task.map(Message::JavaManagerScreen);
+                }
+
+                if let InstancesMessage::InstallLoader(instance_id) = &instances_message {
+                    let id = instance_id.clone();
+                    let loader = self
+                        .instances
+                        .get_pending_loader(&id)
+                        .cloned()
+                        .unwrap_or(instance_manager::ModLoader::Vanilla);
+                    let loader_version = self
+                        .instances
+                        .get_pending_loader_version(&id)
+                        .map(|s| s.to_string());
+
+                    if let Some(loader_ver) = loader_version {
+                        self.instances.mark_installing(&id);
+
+                        // Get Java path for Forge/NeoForge
+                        let config = FastmcConfig::load().unwrap_or_default();
+                        let java_settings =
+                            java_manager::JavaLaunchSettings::from(&config.java);
+
+                        return iced::Task::perform(
+                            async move {
+                                use directories::ProjectDirs;
+                                let dirs =
+                                    ProjectDirs::from("com", "fastmc", "fastmc").unwrap();
+                                let instance_dir =
+                                    dirs.data_local_dir().join("instances").join(&id);
+
+                                // Load instance metadata to get game_version
+                                let json_path = instance_dir.join("instance.json");
+                                let content = tokio::fs::read_to_string(&json_path)
+                                    .await
+                                    .map_err(|e| format!("Failed to read instance: {}", e))?;
+                                let mut metadata: instance_manager::InstanceMetadata =
+                                    serde_json::from_str(&content)
+                                        .map_err(|e| format!("Invalid instance: {}", e))?;
+
+                                // Detect Java for Forge/NeoForge
+                                let java_path = if matches!(
+                                    loader,
+                                    instance_manager::ModLoader::Forge
+                                        | instance_manager::ModLoader::NeoForge
+                                ) {
+                                    let java_config = java_settings.detection_config();
+                                    let summary = tokio::task::spawn_blocking(move || {
+                                        java_manager::detect_installations(&java_config)
+                                    })
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                    Some(
+                                        summary
+                                            .select_for_version(&metadata.game_version)?,
+                                    )
+                                } else {
+                                    None
+                                };
+
+                                loader_installer::install_loader(
+                                    &instance_dir,
+                                    &metadata.game_version,
+                                    loader.clone(),
+                                    &loader_ver,
+                                    java_path.as_deref(),
+                                )
+                                .await?;
+
+                                // Update instance metadata
+                                metadata.loader = loader;
+                                metadata.loader_version = Some(loader_ver);
+                                metadata.loader_installed = true;
+                                let json = serde_json::to_string_pretty(&metadata)
+                                    .map_err(|e| e.to_string())?;
+                                tokio::fs::write(&json_path, json)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+
+                                Ok(id)
+                            },
+                            |res| {
+                                Message::InstancesScreen(InstancesMessage::LoaderInstalled(res))
+                            },
+                        );
+                    }
                 }
 
                 if let InstancesMessage::LaunchInstance(instance_id) = &instances_message {
